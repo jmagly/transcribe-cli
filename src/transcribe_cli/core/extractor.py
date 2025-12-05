@@ -125,7 +125,7 @@ def get_media_info(path: Path) -> MediaInfo:
     """
     ffprobe_path = find_ffprobe()
     if ffprobe_path is None:
-        raise FFmpegNotFoundError("ffprobe is not installed or not in PATH.")
+        raise FFmpegNotFoundError()  # Uses default message with installation instructions
 
     try:
         result = subprocess.run(

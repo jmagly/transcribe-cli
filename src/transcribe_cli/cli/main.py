@@ -532,5 +532,151 @@ def config(
         console.print("[dim]Set OPENAI_API_KEY environment variable for API access.[/dim]")
 
 
+@app.command()
+def setup(
+    check: bool = typer.Option(
+        False,
+        "--check",
+        help="Check if all dependencies are installed.",
+    ),
+    install_ffmpeg: bool = typer.Option(
+        False,
+        "--install-ffmpeg",
+        help="Attempt to install FFmpeg automatically.",
+    ),
+) -> None:
+    """Check and install required dependencies.
+
+    Examples:
+        transcribe setup --check
+        transcribe setup --install-ffmpeg
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    from transcribe_cli.core import check_ffmpeg_available, validate_ffmpeg
+
+    if check or (not install_ffmpeg):
+        console.print("[bold]Dependency Check[/bold]")
+        console.print()
+
+        # Check FFmpeg
+        ffmpeg_path = shutil.which("ffmpeg")
+        ffprobe_path = shutil.which("ffprobe")
+
+        if ffmpeg_path and ffprobe_path:
+            try:
+                info = validate_ffmpeg()
+                console.print(f"  [green]✓[/green] FFmpeg {info.version_display} ({ffmpeg_path})")
+            except Exception as e:
+                console.print(f"  [yellow]⚠[/yellow] FFmpeg found but has issues: {e}")
+        else:
+            console.print("  [red]✗[/red] FFmpeg not found")
+            if sys.platform.startswith("linux"):
+                console.print("    [dim]Install: sudo apt install ffmpeg[/dim]")
+            elif sys.platform == "darwin":
+                console.print("    [dim]Install: brew install ffmpeg[/dim]")
+            elif sys.platform == "win32":
+                console.print("    [dim]Install: choco install ffmpeg[/dim]")
+
+        # Check Python version
+        py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        if sys.version_info >= (3, 9):
+            console.print(f"  [green]✓[/green] Python {py_version}")
+        else:
+            console.print(f"  [red]✗[/red] Python {py_version} (requires 3.9+)")
+
+        # Check API key
+        import os
+        if os.environ.get("OPENAI_API_KEY"):
+            console.print("  [green]✓[/green] OPENAI_API_KEY is set")
+        else:
+            console.print("  [yellow]⚠[/yellow] OPENAI_API_KEY not set")
+            console.print("    [dim]Set: export OPENAI_API_KEY=sk-...[/dim]")
+
+        console.print()
+
+        if not check and not install_ffmpeg:
+            console.print("Use [bold]--check[/bold] to verify dependencies.")
+            console.print("Use [bold]--install-ffmpeg[/bold] to install FFmpeg.")
+
+        if not (ffmpeg_path and ffprobe_path):
+            raise typer.Exit(1)
+
+    if install_ffmpeg:
+        console.print("[bold]Installing FFmpeg...[/bold]")
+        console.print()
+
+        if sys.platform.startswith("linux"):
+            # Detect package manager
+            if shutil.which("apt-get"):
+                cmd = ["sudo", "apt-get", "update"]
+                cmd_install = ["sudo", "apt-get", "install", "-y", "ffmpeg"]
+                console.print("[dim]Using apt-get...[/dim]")
+            elif shutil.which("dnf"):
+                cmd = None
+                cmd_install = ["sudo", "dnf", "install", "-y", "ffmpeg"]
+                console.print("[dim]Using dnf...[/dim]")
+            elif shutil.which("pacman"):
+                cmd = None
+                cmd_install = ["sudo", "pacman", "-S", "--noconfirm", "ffmpeg"]
+                console.print("[dim]Using pacman...[/dim]")
+            else:
+                console.print("[red]Error:[/red] No supported package manager found.")
+                console.print("[dim]Please install FFmpeg manually.[/dim]")
+                raise typer.Exit(1)
+
+            try:
+                if cmd:
+                    subprocess.run(cmd, check=True)
+                subprocess.run(cmd_install, check=True)
+                console.print("[green]FFmpeg installed successfully![/green]")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]Installation failed:[/red] {e}")
+                raise typer.Exit(1)
+
+        elif sys.platform == "darwin":
+            if shutil.which("brew"):
+                console.print("[dim]Using Homebrew...[/dim]")
+                try:
+                    subprocess.run(["brew", "install", "ffmpeg"], check=True)
+                    console.print("[green]FFmpeg installed successfully![/green]")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Installation failed:[/red] {e}")
+                    raise typer.Exit(1)
+            else:
+                console.print("[red]Error:[/red] Homebrew not found.")
+                console.print("[dim]Install Homebrew first: https://brew.sh[/dim]")
+                raise typer.Exit(1)
+
+        elif sys.platform == "win32":
+            if shutil.which("choco"):
+                console.print("[dim]Using Chocolatey...[/dim]")
+                try:
+                    subprocess.run(["choco", "install", "ffmpeg", "-y"], check=True)
+                    console.print("[green]FFmpeg installed successfully![/green]")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Installation failed:[/red] {e}")
+                    raise typer.Exit(1)
+            elif shutil.which("scoop"):
+                console.print("[dim]Using Scoop...[/dim]")
+                try:
+                    subprocess.run(["scoop", "install", "ffmpeg"], check=True)
+                    console.print("[green]FFmpeg installed successfully![/green]")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Installation failed:[/red] {e}")
+                    raise typer.Exit(1)
+            else:
+                console.print("[red]Error:[/red] No supported package manager found.")
+                console.print("[dim]Install Chocolatey or Scoop, or download FFmpeg manually.[/dim]")
+                raise typer.Exit(1)
+
+        else:
+            console.print(f"[red]Error:[/red] Unsupported platform: {sys.platform}")
+            console.print("[dim]Please install FFmpeg manually from https://ffmpeg.org[/dim]")
+            raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
