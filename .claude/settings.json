@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(/home/manitcor/.local/share/ai-writing-guide/agentic/code/frameworks/sdlc-complete/**)",
+      "Read(/home/manitcor/dev/tnf/**)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Write(./**)",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets/**)",
+      "Read(./**/.env)",
+      "Bash(rm:-rf)",
+      "Bash(curl:*)",
+      "WebFetch"
+    ]
+  }
+}

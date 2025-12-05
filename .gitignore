@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Build
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Environment
+.env
+.env.local
+*.key
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+
+# Claude
+.claude/settings.local.json
+
+# Temp files
+*.tmp
+*.temp
+.transcribe_checkpoint_*

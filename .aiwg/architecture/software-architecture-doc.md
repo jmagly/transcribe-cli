@@ -1,0 +1,1659 @@
+# Software Architecture Document: Audio Transcription CLI Tool
+
+---
+
+## Document Information
+
+| Attribute | Value |
+|-----------|-------|
+| **Document Type** | Software Architecture Document (SAD) |
+| **Version** | 1.0 (BASELINED) |
+| **Status** | APPROVED |
+| **Date** | 2025-12-04 |
+| **Project** | Audio Transcription CLI Tool |
+| **Phase** | Elaboration |
+| **Primary Author** | Architecture Designer Agent |
+| **Reviewers** | Security Architect (7/10 CONDITIONAL->APPROVED), Test Architect (7/10 CONDITIONAL->APPROVED), Requirements Analyst (9/10 APPROVED), Technical Writer (8.5/10 APPROVED) |
+
+---
+
+## 1. Introduction
+
+### 1.1 Purpose
+
+This Software Architecture Document (SAD) provides a comprehensive architectural blueprint for the Audio Transcription CLI Tool. It serves as the authoritative reference for developers, reviewers, and stakeholders to understand the system's structure, components, interactions, and design decisions.
+
+The document supports:
+- Development teams implementing system components
+- Test architects designing test strategies
+- Security architects validating security controls
+- Operations teams planning deployment and monitoring
+- Future maintainers understanding design rationale
+
+### 1.2 Scope
+
+This SAD covers the architectural design for the MVP release of the Audio Transcription CLI Tool, including:
+
+- **In-Scope**: Audio extraction from MKV video files, direct audio transcription (MP3, AAC, FLAC, WAV, M4A), batch processing, large file handling, TXT and SRT output formats
+- **Out-of-Scope**: Real-time transcription, video subtitle embedding, custom model training, GUI/web interface, local Whisper model support (deferred to v2)
+
+### 1.3 Audience
+
+| Audience | Relevance |
+|----------|-----------|
+| **Developers** | Component design, implementation guidance, coding patterns |
+| **Test Architects** | Test strategy alignment, component boundaries, testability |
+| **Security Architects** | Security controls, threat surface, data flow |
+| **Operations** | Deployment model, monitoring, dependencies |
+| **Stakeholders** | Technology choices, risk mitigation, roadmap alignment |
+
+### 1.4 Architectural Drivers and Constraints
+
+#### 1.4.1 Business Drivers
+
+| Driver | Description | Architecture Impact |
+|--------|-------------|---------------------|
+| **80% Team Adoption** | Tool must be easy to install and use | Simple CLI, minimal dependencies, clear error messages |
+| **70% Time Savings** | Reduce 30-min workflow to <5 min | Automated extraction, batch processing, progress indicators |
+| **1-3 Month Timeline** | MVP delivery within tight timeline | Monolithic CLI (not microservices), leverage existing libraries |
+| **Internal Tool** | 2-10 team members, no external users | Baseline security, no multi-tenancy, no Service Level Agreements (SLAs) |
+
+#### 1.4.2 Technical Constraints
+
+| Constraint | Impact | Mitigation |
+|------------|--------|------------|
+| **FFmpeg Dependency** | External binary required for audio extraction | Clear installation docs (see ADR-001), startup validation, helpful errors |
+| **OpenAI API 25MB Limit** | Large files require chunking | Automatic chunking, timestamp synchronization, resume support |
+| **OpenAI Rate Limits** | Batch processing with >10 concurrent requests may hit rate limits | Configurable concurrency, exponential backoff |
+| **Cross-Platform Support** | Linux, macOS, Windows | Python 3.9+, platform-agnostic path handling |
+
+#### 1.4.3 Quality Attribute Priorities
+
+| Attribute | Priority | Target |
+|-----------|----------|--------|
+| **Simplicity** | High | Single-command execution, minimal configuration |
+| **Reliability** | High | 95%+ success rate for valid files |
+| **Maintainability** | High | Modular design, 60% test coverage |
+| **Performance** | Medium | <6 min for 1-hour MKV transcription |
+| **Security** | Medium | API key protection, input validation |
+
+---
+
+## 2. Architectural Overview
+
+### 2.1 Architecture Style
+
+The Audio Transcription CLI Tool adopts a **Simple CLI Monolith** architecture with modular internal structure. This is a single-process Python application distributed as a pip-installable package that runs locally on the user's machine.
+
+**Rationale**: This style is optimal for:
+- Small team (2-5 developers) with limited coordination overhead
+- Straightforward linear workflow (Extract -> Transcribe -> Format)
+- Internal tool with no distributed system requirements
+- Fast iteration and minimal operational overhead
+
+### 2.2 High-Level System Architecture
+
+```
+                                USER
+                                  |
+                                  v
++-------------------------------------------------------------------+
+|                        CLI Entry Point                            |
+|                      (transcribe-cli)                             |
+|-------------------------------------------------------------------|
+|  Commands: transcribe | extract | batch | config                  |
++-------------------------------------------------------------------+
+                     |
+     +---------------+----------------+
+     |               |                |
+     v               v                v
++------------+  +------------+  +------------+
+|   Audio    |  |Transcriber |  |   Output   |
+|  Extractor |  |   Client   |  |  Formatter |
+|   Module   |  |   Module   |  |   Module   |
++------------+  +------------+  +------------+
+     |               |                |
+     v               v                v
++------------+  +------------+  +------------+
+|   FFmpeg   |  |   OpenAI   |  |    File    |
+|  (binary)  |  | Whisper API|  |   System   |
++------------+  +------------+  +------------+
+
++-------------------------------------------------------------------+
+|                    Supporting Modules                             |
+|-------------------------------------------------------------------|
+|  Config Manager | Batch Processor | Progress Tracker | Utilities  |
++-------------------------------------------------------------------+
+```
+
+### 2.3 Major Component Summary
+
+| Component | Responsibility | Key Technology |
+|-----------|----------------|----------------|
+| **CLI Entry Point** | Command parsing, routing, user interaction | click or typer |
+| **Audio Extractor** | FFmpeg wrapper, video-to-audio extraction | ffmpeg-python |
+| **Transcriber Client** | Whisper API integration, chunking, retry | openai SDK |
+| **Output Formatter** | TXT/SRT conversion, timestamp formatting | Python stdlib, srt |
+| **Batch Processor** | Parallel file processing, progress aggregation | asyncio |
+| **Config Manager** | Environment loading, validation, defaults | pydantic, python-dotenv |
+| **Progress Tracker** | Real-time terminal output, ETA calculation | rich |
+| **Utilities** | File operations, logging, error handling | Python stdlib |
+
+---
+
+## 3. Architecturally Significant Requirements
+
+### 3.1 Key Functional Requirements
+
+| ID | Requirement | Architecture Impact |
+|----|-------------|---------------------|
+| **FR-001** | Extract audio from MKV video files | Audio Extractor Module, FFmpeg dependency |
+| **FR-002** | Transcribe MP3, AAC, FLAC, WAV, M4A formats | Format detection, API integration |
+| **FR-003** | Support batch processing of directories | Batch Processor, async concurrency |
+| **FR-004** | Handle files >25MB via automatic chunking | Chunker component, timestamp synchronization |
+| **FR-005** | Generate TXT and SRT output formats | Output Formatter with extensible design |
+
+### 3.2 Key Non-Functional Requirements
+
+| ID | Requirement | Target | Architecture Impact |
+|----|-------------|--------|---------------------|
+| **NFR-001** | Processing success rate | 95%+ for valid files | Comprehensive error handling, retry logic |
+| **NFR-002** | Single file transcription time | <5 min for 30-min audio | Async API calls, progress feedback |
+| **NFR-003** | Batch processing speedup | 5x vs. sequential | Configurable async concurrency (default: 5) |
+| **NFR-004** | Test coverage | 60% minimum | Testable module boundaries, mock interfaces |
+| **NFR-005** | API key security | Never logged or exposed | Environment variables, log sanitization |
+
+### 3.3 Use Case to Architecture Mapping
+
+| Use Case | Components Involved | Data Flow |
+|----------|---------------------|-----------|
+| **UC-001**: Transcribe Single Audio | CLI -> Transcriber -> Formatter -> File System | Linear pipeline |
+| **UC-002**: Extract and Transcribe Video | CLI -> Extractor -> Transcriber -> Formatter -> File System | Two-phase with temp files |
+| **UC-003**: Batch Process Directory | CLI -> Batch Processor -> [Extractor/Transcriber] -> Formatter | Parallel with aggregation |
+| **UC-004**: Handle Large File | CLI -> Extractor -> Chunker -> Transcriber (per chunk) -> Merger -> Formatter | Multi-stage with state |
+| **UC-005**: Generate Timestamped Output | CLI -> Transcriber (with timestamps) -> SRT Formatter | Same pipeline, different output |
+
+---
+
+## 4. Architectural Views
+
+### 4.1 Logical View
+
+#### 4.1.1 Component Diagram
+
+```
++--------------------------------------------------------------------+
+|                        transcribe-cli                               |
++--------------------------------------------------------------------+
+|                                                                     |
+|  +-----------------+    +-----------------+    +-----------------+  |
+|  |   cli/          |    |   core/         |    |   output/       |  |
+|  |                 |    |                 |    |                 |  |
+|  | - main.py       |    | - extractor.py  |    | - formatter.py  |  |
+|  | - commands/     |    | - transcriber.py|    | - txt.py        |  |
+|  |   - transcribe  |    | - chunker.py    |    | - srt.py        |  |
+|  |   - extract     |    | - processor.py  |    | - vtt.py (v2)   |  |
+|  |   - batch       |    |                 |    | - json.py (v2)  |  |
+|  |   - config      |    |                 |    |                 |  |
+|  +-----------------+    +-----------------+    +-----------------+  |
+|                                                                     |
+|  +-----------------+    +-----------------+    +-----------------+  |
+|  |   config/       |    |   utils/        |    |   models/       |  |
+|  |                 |    |                 |    |                 |  |
+|  | - settings.py   |    | - file_utils.py |    | - job.py        |  |
+|  | - validators.py |    | - progress.py   |    | - config.py     |  |
+|  | - defaults.py   |    | - logging.py    |    | - audio.py      |  |
+|  |                 |    | - errors.py     |    | - transcript.py |  |
+|  +-----------------+    +-----------------+    +-----------------+  |
+|                                                                     |
++--------------------------------------------------------------------+
+```
+
+#### 4.1.2 Component Responsibilities
+
+**CLI Layer (`cli/`)**
+
+| Component | Responsibility | Interfaces |
+|-----------|----------------|------------|
+| `main.py` | Application entry point, CLI group registration | User commands |
+| `commands/transcribe.py` | Single file transcription command | Input file, options |
+| `commands/extract.py` | Audio-only extraction command | Input video, output path |
+| `commands/batch.py` | Directory batch processing command | Directory path, options |
+| `commands/config.py` | Configuration management subcommands | Config operations |
+
+**Core Layer (`core/`)**
+
+| Component | Responsibility | Interfaces |
+|-----------|----------------|------------|
+| `extractor.py` | FFmpeg wrapper for audio extraction | Video path -> Audio path |
+| `transcriber.py` | OpenAI Whisper API client | Audio path -> Transcript |
+| `chunker.py` | Large file chunking and merging | Audio path -> Chunk paths |
+| `processor.py` | Batch processing orchestration | File list -> Results list |
+
+**Output Layer (`output/`)**
+
+| Component | Responsibility | Interfaces |
+|-----------|----------------|------------|
+| `formatter.py` | Abstract formatter interface | Transcript -> String |
+| `txt.py` | Plain text output formatter | Transcript -> TXT |
+| `srt.py` | SRT subtitle formatter | Transcript with timestamps -> SRT |
+
+**Supporting Modules**
+
+| Component | Responsibility | Interfaces |
+|-----------|----------------|------------|
+| `config/settings.py` | Configuration loading and validation | Environment -> Config |
+| `utils/progress.py` | Progress bar management | Status updates -> Terminal |
+| `utils/errors.py` | Custom exception definitions | Error context -> User message |
+| `models/*.py` | Data transfer objects | Structured data exchange |
+
+#### 4.1.3 Interface Contracts
+
+**Transcriber Interface**
+
+```python
+class TranscriberProtocol(Protocol):
+    """Contract for transcription implementations."""
+
+    async def transcribe(
+        self,
+        audio_path: Path,
+        options: TranscriptionOptions
+    ) -> TranscriptionResult:
+        """Transcribe audio file and return result with segments."""
+        ...
+
+@dataclass
+class TranscriptionOptions:
+    language: Optional[str] = None  # Auto-detect if None
+    timestamp_granularity: str = "segment"  # "segment" or "word"
+
+@dataclass
+class TranscriptionResult:
+    text: str
+    segments: List[Segment]
+    language: str
+    duration: float
+
+@dataclass
+class Segment:
+    id: int
+    start: float  # seconds
+    end: float    # seconds
+    text: str
+    speaker_id: Optional[str] = None  # Reserved for v2 speaker diarization
+```
+
+**Output Formatter Interface**
+
+```python
+from abc import ABC, abstractmethod
+
+class OutputFormatter(ABC):
+    """Abstract base for output formatters."""
+
+    @abstractmethod
+    def format(self, result: TranscriptionResult) -> str:
+        """Format transcription result to output string."""
+        pass
+
+    @abstractmethod
+    def file_extension(self) -> str:
+        """Return file extension for this format."""
+        pass
+
+class TxtFormatter(OutputFormatter):
+    def format(self, result: TranscriptionResult) -> str:
+        return result.text
+
+    def file_extension(self) -> str:
+        return ".txt"
+
+class SrtFormatter(OutputFormatter):
+    def format(self, result: TranscriptionResult) -> str:
+        lines = []
+        for segment in result.segments:
+            lines.append(str(segment.id))
+            lines.append(f"{self._format_time(segment.start)} --> {self._format_time(segment.end)}")
+            lines.append(segment.text.strip())
+            lines.append("")
+        return "\n".join(lines)
+
+    def file_extension(self) -> str:
+        return ".srt"
+```
+
+#### 4.1.4 Adding New Output Formats
+
+To add new output formats (VTT, JSON) in v2:
+
+1. **Create formatter class** inheriting from `OutputFormatter`
+2. **Implement format() method** with format-specific logic
+3. **Register in formatter factory** (see `output/formatter.py`)
+
+**VTT Example**:
+```python
+class VttFormatter(OutputFormatter):
+    def format(self, result: TranscriptionResult) -> str:
+        lines = ["WEBVTT", ""]
+        for segment in result.segments:
+            lines.append(f"{self._format_time(segment.start)} --> {self._format_time(segment.end)}")
+            lines.append(segment.text.strip())
+            lines.append("")
+        return "\n".join(lines)
+
+    def file_extension(self) -> str:
+        return ".vtt"
+```
+
+**JSON Example** (includes metadata):
+```python
+class JsonFormatter(OutputFormatter):
+    def format(self, result: TranscriptionResult) -> str:
+        return json.dumps({
+            "text": result.text,
+            "language": result.language,
+            "duration": result.duration,
+            "segments": [asdict(s) for s in result.segments]
+        }, indent=2)
+
+    def file_extension(self) -> str:
+        return ".json"
+```
+
+### 4.2 Process View
+
+#### 4.2.1 Runtime Processes
+
+The application runs as a single process with the following characteristics:
+
+| Aspect | Description |
+|--------|-------------|
+| **Process Model** | Single Python process, short-lived CLI invocation |
+| **Concurrency Model** | asyncio-based cooperative multitasking for I/O-bound operations (async/await pattern) |
+| **Thread Usage** | Main thread for CLI, async tasks for API calls |
+| **Memory Model** | Streaming for large files, chunk-based processing |
+
+#### 4.2.2 Single File Transcription Sequence
+
+```
+User          CLI           Config        Extractor      Transcriber     Formatter      FileSystem
+ |             |              |              |              |              |              |
+ |--transcribe file.mkv------>|              |              |              |              |
+ |             |--load config->|              |              |              |              |
+ |             |<--settings----|              |              |              |              |
+ |             |              |              |              |              |              |
+ |             |--detect type--------------->|              |              |              |
+ |             |<--VIDEO (MKV)---------------|              |              |              |
+ |             |              |              |              |              |              |
+ |             |--extract audio------------->|              |              |              |
+ |             |              |              |--ffmpeg------|              |              |
+ |             |              |              |<-temp.mp3----|              |              |
+ |             |<--temp audio path-----------|              |              |              |
+ |             |              |              |              |              |              |
+ |             |--transcribe audio------------------------>|              |              |
+ |             |              |              |              |--API call--->|              |
+ |             |              |              |              |<-response----|              |
+ |             |<--transcript result------------------------|              |              |
+ |             |              |              |              |              |              |
+ |             |--format output-------------------------------------->|              |
+ |             |<--formatted string-----------------------------------|              |
+ |             |              |              |              |              |              |
+ |             |--write file-------------------------------------------------->|
+ |             |<--success-----------------------------------------------------|
+ |             |              |              |              |              |              |
+ |             |--cleanup temp-------------->|              |              |              |
+ |             |              |              |              |              |              |
+ |<--Success message----------|              |              |              |              |
+```
+
+#### 4.2.3 Batch Processing Sequence
+
+```
+User          CLI          BatchProcessor     Semaphore      Transcriber      Progress
+ |             |               |                  |              |              |
+ |--batch ./recordings-------->|                  |              |              |
+ |             |--scan files--->|                  |              |              |
+ |             |               |--create queue--->|              |              |
+ |             |               |                  |              |              |
+ |             |               |==== PARALLEL PROCESSING =====>|              |
+ |             |               |                  |              |              |
+ |             |               |--acquire(5)----->|              |              |
+ |             |               |<--slot 1---------|              |              |
+ |             |               |--transcribe file1------------->|              |
+ |             |               |                  |              |--update---->|
+ |             |               |                  |              |              |
+ |             |               |--acquire-------->|              |              |
+ |             |               |<--slot 2---------|              |              |
+ |             |               |--transcribe file2------------->|              |
+ |             |               |                  |              |--update---->|
+ |             |               |                  |              |              |
+ |             |               |       ... (up to 5 parallel) ...|              |
+ |             |               |                  |              |              |
+ |             |               |<--result 1----------------------|              |
+ |             |               |--release slot 1->|              |              |
+ |             |               |                  |              |--advance--->|
+ |             |               |                  |              |              |
+ |             |               |       ... (process remaining) ..|              |
+ |             |               |                  |              |              |
+ |             |<--aggregate results--------------|              |              |
+ |             |               |                  |              |              |
+ |<--Summary report------------|                  |              |              |
+```
+
+#### 4.2.4 Large File Chunking Sequence
+
+```
+User          CLI          Chunker        Transcriber       Merger         FileSystem
+ |             |              |              |              |              |
+ |--transcribe large.mp3----->|              |              |              |
+ |             |--check size->|              |              |              |
+ |             |<--45MB (>25MB limit)--------|              |              |
+ |             |              |              |              |              |
+ |             |--chunk file->|              |              |              |
+ |             |              |--ffmpeg split--------------->              |
+ |             |              |<-chunk paths-|              |              |
+ |             |              |              |              |              |
+ |             |--transcribe chunk 1----------------------->|              |
+ |             |<--transcript 1 (0:00-40:00)----------------|              |
+ |             |--save checkpoint---------------------------------------------->|
+ |             |              |              |              |              |
+ |             |--transcribe chunk 2----------------------->|              |
+ |             |<--transcript 2 (raw timestamps)------------|              |
+ |             |              |              |              |              |
+ |             |--transcribe chunk 3----------------------->|              |
+ |             |<--transcript 3 (raw timestamps)------------|              |
+ |             |              |              |              |              |
+ |             |--merge transcripts-------------------------------->|      |
+ |             |              |              |              |--offset timestamps
+ |             |<--merged transcript with continuous timestamps-----|      |
+ |             |              |              |              |              |
+ |             |--cleanup chunks-------------------------------------------->|
+ |             |              |              |              |              |
+ |<--Success (seamless transcript)--------|              |              |
+```
+
+### 4.3 Development View
+
+#### 4.3.1 Module Structure
+
+```
+transcribe-cli/
+|-- pyproject.toml           # Project configuration, dependencies
+|-- README.md                # User documentation
+|-- LICENSE                  # MIT License
+|-- .env.example             # Example environment configuration
+|-- .gitignore               # Git ignore patterns
+|
+|-- src/
+|   |-- transcribe_cli/
+|       |-- __init__.py      # Package initialization, version
+|       |-- __main__.py      # Entry point: python -m transcribe_cli
+|       |
+|       |-- cli/
+|       |   |-- __init__.py
+|       |   |-- main.py      # CLI group definition
+|       |   |-- commands/
+|       |       |-- __init__.py
+|       |       |-- transcribe.py
+|       |       |-- extract.py
+|       |       |-- batch.py
+|       |       |-- config.py
+|       |
+|       |-- core/
+|       |   |-- __init__.py
+|       |   |-- extractor.py
+|       |   |-- transcriber.py
+|       |   |-- chunker.py
+|       |   |-- processor.py
+|       |
+|       |-- output/
+|       |   |-- __init__.py
+|       |   |-- formatter.py
+|       |   |-- txt.py
+|       |   |-- srt.py
+|       |
+|       |-- config/
+|       |   |-- __init__.py
+|       |   |-- settings.py
+|       |   |-- validators.py
+|       |   |-- defaults.py
+|       |
+|       |-- models/
+|       |   |-- __init__.py
+|       |   |-- job.py
+|       |   |-- audio.py
+|       |   |-- transcript.py
+|       |
+|       |-- utils/
+|           |-- __init__.py
+|           |-- file_utils.py
+|           |-- progress.py
+|           |-- logging.py
+|           |-- errors.py
+|
+|-- tests/
+|   |-- __init__.py
+|   |-- conftest.py          # Shared fixtures
+|   |-- unit/
+|   |   |-- test_extractor.py
+|   |   |-- test_transcriber.py
+|   |   |-- test_formatter.py
+|   |   |-- test_chunker.py
+|   |-- integration/
+|   |   |-- test_cli.py
+|   |   |-- test_workflow.py
+|   |-- fixtures/
+|       |-- sample.mp3       # Test audio file
+|       |-- sample.mkv       # Test video file
+|
+|-- docs/
+    |-- INSTALL_WINDOWS_FFMPEG.md
+    |-- TROUBLESHOOTING.md
+```
+
+#### 4.3.2 Layer Dependencies
+
+```
++------------------+
+|       CLI        |  <- User interaction, argument parsing
++--------+---------+
+         |
+         | depends on
+         v
++------------------+
+|       Core       |  <- Business logic, external integrations
++--------+---------+
+         |
+         | depends on
+         v
++------------------+
+|     Output       |  <- Format conversion, file writing
++--------+---------+
+         |
+         | depends on
+         v
++------------------+
+|  Config/Models   |  <- Configuration, data structures
++--------+---------+
+         |
+         | depends on
+         v
++------------------+
+|     Utils        |  <- Cross-cutting utilities
++------------------+
+```
+
+**Dependency Rules**:
+1. CLI layer may only depend on Core, Output, Config, and Utils
+2. Core layer may only depend on Output, Config, Models, and Utils
+3. Output layer may only depend on Models and Utils
+4. Config/Models may only depend on Utils
+5. Utils has no internal dependencies
+
+#### 4.3.3 Reuse Strategy
+
+| Component | Reuse Pattern |
+|-----------|---------------|
+| **Output Formatters** | Strategy pattern - add new formats by implementing OutputFormatter |
+| **Transcriber** | Abstraction layer for potential future providers (local Whisper, alternative APIs) |
+| **File Operations** | Centralized in utils/file_utils.py for consistent handling |
+| **Progress Tracking** | Shared progress context passed through call stack |
+
+### 4.4 Physical/Deployment View
+
+#### 4.4.1 Deployment Model
+
+```
++------------------------------------------------------------------+
+|                      User's Local Machine                        |
+|------------------------------------------------------------------|
+|                                                                   |
+|  +--------------------+    +-------------------+                  |
+|  | transcribe-cli     |    | Python Runtime    |                  |
+|  | (pip package)      |    | (3.9+)            |                  |
+|  +--------------------+    +-------------------+                  |
+|           |                        |                              |
+|           v                        v                              |
+|  +--------------------+    +-------------------+                  |
+|  | FFmpeg Binary      |    | pip Dependencies  |                  |
+|  | (system install)   |    | (openai, rich...) |                  |
+|  +--------------------+    +-------------------+                  |
+|                                                                   |
+|  +----------------------------------------------------------+    |
+|  | File System                                               |    |
+|  | - Input: ./recordings/                                    |    |
+|  | - Output: ./transcripts/                                  |    |
+|  | - Config: ~/.transcriberc or .env                         |    |
+|  | - Temp: /tmp/transcribe-<pid>-<random>/                   |    |
+|  +----------------------------------------------------------+    |
+|                                                                   |
++------------------------------------------------------------------+
+                              |
+                              | HTTPS (TLS 1.2+)
+                              v
++------------------------------------------------------------------+
+|                    OpenAI Cloud Services                         |
+|------------------------------------------------------------------|
+|  +-------------------+                                           |
+|  | Whisper API       |                                           |
+|  | /v1/audio/        |                                           |
+|  | transcriptions    |                                           |
+|  +-------------------+                                           |
++------------------------------------------------------------------+
+```
+
+#### 4.4.2 Installation Flow
+
+```
++----------------+     +------------------+     +------------------+
+| Prerequisites  |     | Install CLI      |     | Configure        |
+| Check          |---->| Package          |---->| API Key          |
++----------------+     +------------------+     +------------------+
+        |                      |                       |
+        v                      v                       v
+  1. Python 3.9+        pip install            export OPENAI_API_KEY
+  2. FFmpeg 4.0+        transcribe-cli         or create .env file
+        |                      |                       |
+        v                      v                       v
++----------------+     +------------------+     +------------------+
+| Verify         |     | Verify           |     | Ready to Use     |
+| ffmpeg -version|     | transcribe --help|     | transcribe file  |
++----------------+     +------------------+     +------------------+
+```
+
+#### 4.4.3 Platform-Specific Notes
+
+| Platform | FFmpeg Installation | Python | Special Considerations |
+|----------|---------------------|--------|------------------------|
+| **Ubuntu/Debian** | `sudo apt install ffmpeg` | System or pyenv | Most straightforward |
+| **macOS** | `brew install ffmpeg` | System or pyenv | Apple Silicon support via Homebrew |
+| **Windows** | Download + PATH setup | Python.org installer | Detailed guide required |
+
+### 4.5 Data View
+
+#### 4.5.1 Data Flow Diagram
+
+```
+                         +----------------+
+                         |  Input Files   |
+                         | (MKV,MP3,etc.) |
+                         +-------+--------+
+                                 |
+                                 v
++----------------+      +----------------+      +----------------+
+|  FFmpeg        |----->|  Temp Audio    |----->|  Audio Bytes   |
+|  Extraction    |      |  File (.mp3)   |      |  (< 25MB)      |
++----------------+      +----------------+      +----------------+
+                                                        |
+                                                        v
+                                               +----------------+
+                                               |  Whisper API   |
+                                               |  Request       |
+                                               +----------------+
+                                                        |
+                                                        v
+                                               +----------------+
+                                               |  JSON Response |
+                                               |  (text +       |
+                                               |   timestamps)  |
+                                               +----------------+
+                                                        |
+                                                        v
+                                               +----------------+
+                                               | TranscriptResult|
+                                               | (internal model)|
+                                               +----------------+
+                                                        |
+                         +------------------------------+------------------------------+
+                         |                              |                              |
+                         v                              v                              v
+                +----------------+            +----------------+            +----------------+
+                |  TXT Output    |            |  SRT Output    |            |  JSON Output   |
+                |  (plain text)  |            |  (subtitles)   |            |  (metadata) v2 |
+                +----------------+            +----------------+            +----------------+
+                         |                              |                              |
+                         v                              v                              v
+                +-------------------------------------------------------------------+
+                |                        Output Directory                           |
+                |                      (./transcripts/)                             |
+                +-------------------------------------------------------------------+
+```
+
+#### 4.5.2 Data Models
+
+**TranscriptionJob** (Processing State)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Unique job identifier |
+| `input_path` | Path | Source file path |
+| `output_path` | Path | Target transcript path |
+| `file_type` | Enum | AUDIO or VIDEO |
+| `status` | Enum | PENDING, PROCESSING, COMPLETED, FAILED |
+| `progress` | float | 0.0 to 1.0 completion |
+| `error` | Optional[str] | Error message if failed |
+| `started_at` | datetime | Processing start time |
+| `completed_at` | Optional[datetime] | Processing completion time |
+
+**TranscriptionResult** (API Response)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | str | Full transcript text |
+| `segments` | List[Segment] | Timestamped segments |
+| `language` | str | Detected language code |
+| `duration` | float | Audio duration in seconds |
+
+**Segment** (Transcript Unit)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Segment number (1-based) |
+| `start` | float | Start time in seconds |
+| `end` | float | End time in seconds |
+| `text` | str | Segment transcript text |
+| `speaker_id` | Optional[str] | Reserved for v2 speaker diarization |
+
+**ChunkState** (Resume Support)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `file_path` | str | Original file path (relative from working directory) |
+| `total_chunks` | int | Number of chunks |
+| `completed_chunks` | List[int] | Completed chunk indices |
+| `failed_chunks` | List[int] | Failed chunk indices |
+| `pending_chunks` | List[int] | Remaining chunk indices |
+
+#### 4.5.3 Storage Strategy
+
+| Data Type | Storage Location | Retention |
+|-----------|------------------|-----------|
+| **Input Files** | User's filesystem | Unchanged |
+| **Temp Audio** | System temp dir (`/tmp/transcribe-<pid>-<random>/`) | Deleted within 5 minutes of completion |
+| **Chunk Files** | System temp dir | Deleted after merge |
+| **Checkpoint** | Working directory (`.transcribe-state.json`) | Deleted on success, preserved on failure for 7 days |
+| **Transcripts** | Output directory | Permanent |
+| **Error Logs** | Output directory | Permanent |
+
+---
+
+## 5. Runtime Scenarios
+
+### 5.1 UC-001: Transcribe Single Audio File
+
+**Scenario**: User transcribes a 5-minute MP3 meeting recording.
+
+```
+Input:  transcribe meeting.mp3
+Output: ./transcripts/meeting.txt
+
+Timeline (estimated):
+  0:00 - 0:01  CLI parsing, validation
+  0:01 - 0:03  API request upload
+  0:03 - 0:45  Whisper processing (API-side)
+  0:45 - 0:46  Response parsing, formatting
+  0:46 - 0:47  File write, success message
+
+Total: ~50 seconds for 5-minute audio
+```
+
+**Key Behaviors**:
+1. File validation (exists, readable, supported format)
+2. Size check (under 25MB - no chunking needed)
+3. Direct API upload
+4. Progress indicator during API wait
+5. TXT output with word count summary
+
+### 5.2 UC-002: Extract and Transcribe Video File
+
+**Scenario**: User transcribes a 30-minute MKV meeting recording from Zoom.
+
+```
+Input:  transcribe zoom_meeting.mkv --format srt
+Output: ./transcripts/zoom_meeting.srt
+
+Timeline (estimated):
+  0:00 - 0:05  CLI parsing, validation, FFmpeg check
+  0:05 - 0:30  Audio extraction (FFmpeg)
+  0:30 - 0:35  API request upload (extracted audio ~15MB)
+  0:35 - 3:30  Whisper processing (30 min audio)
+  3:30 - 3:31  Response parsing, SRT formatting
+  3:31 - 3:32  File write, temp cleanup, success message
+
+Total: ~3.5 minutes for 30-minute video
+```
+
+**Key Behaviors**:
+1. Detect video file type (MKV)
+2. FFmpeg validation and audio extraction
+3. Temp file management (extract to /tmp)
+4. Progress indicators for both phases
+5. SRT output with timestamp accuracy
+6. Automatic temp file cleanup
+
+### 5.3 UC-003: Batch Process Directory
+
+**Scenario**: User transcribes 10 interview recordings in a directory.
+
+```
+Input:  transcribe ./interviews/ --format txt --concurrency 5
+Output: ./transcripts/interview-001.txt through interview-010.txt
+
+Timeline (estimated, 5 parallel workers):
+  0:00 - 0:05  Directory scan, file validation
+  0:05 - 0:10  Launch 5 parallel workers
+  0:10 - 2:00  Process files 1-5 (parallel)
+  2:00 - 4:00  Process files 6-10 (parallel)
+  4:00 - 4:05  Aggregate results, generate summary
+
+Total: ~4 minutes for 10 files (~20 min if sequential)
+```
+
+**Key Behaviors**:
+1. Recursive directory scanning with extension filter
+2. Parallel processing with semaphore-based concurrency
+3. Progress bar showing overall and per-file status
+4. Error isolation (one failure doesn't stop batch)
+5. Summary report with success/failure counts
+
+### 5.4 UC-004: Handle Large File (>25MB)
+
+**Scenario**: User transcribes a 90-minute podcast episode (45MB).
+
+```
+Input:  transcribe podcast_episode.mp3
+Output: ./transcripts/podcast_episode.txt
+
+Timeline (estimated):
+  0:00 - 0:05  CLI parsing, size detection (45MB > 25MB)
+  0:05 - 0:30  Chunk audio into 3 segments (~40 min each)
+  0:30 - 3:30  Transcribe chunk 1 (0:00-40:00)
+  3:30 - 6:30  Transcribe chunk 2 (40:00-80:00)
+  6:30 - 8:30  Transcribe chunk 3 (80:00-90:00)
+  8:30 - 8:35  Merge transcripts, apply timestamp offsets
+  8:35 - 8:40  Cleanup chunk files, success message
+
+Total: ~8-9 minutes for 90-minute podcast
+```
+
+**Key Behaviors**:
+1. Automatic size detection and chunking decision
+2. FFmpeg-based time-based splitting
+3. Sequential chunk transcription (respects rate limits)
+4. Checkpoint saving after each chunk (resume support)
+5. Timestamp offset calculation for seamless merge
+6. Temp file cleanup on completion
+
+### 5.5 UC-005: Generate Timestamped Output (SRT)
+
+**Scenario**: User generates SRT subtitles for a video tutorial.
+
+```
+Input:  transcribe tutorial.mp4 --format srt
+Output: ./transcripts/tutorial.srt
+
+SRT Output Sample:
+1
+00:00:00,000 --> 00:00:03,500
+Welcome to this Python tutorial.
+
+2
+00:00:03,800 --> 00:00:07,200
+Today we'll cover the basics of functions.
+
+3
+00:00:07,500 --> 00:00:12,100
+Let's start by opening our code editor.
+```
+
+**Key Behaviors**:
+1. Request verbose_json response from Whisper API
+2. Extract segment timestamps from response
+3. Format timestamps as SRT-compliant (HH:MM:SS,mmm)
+4. Sequential segment numbering
+5. Proper SRT structure (blank lines between entries)
+
+---
+
+## 6. Design Decisions and Rationale
+
+### 6.1 Architecture Decision Records Summary
+
+| ADR | Decision | Status | Impact |
+|-----|----------|--------|--------|
+| **ADR-001** | Use ffmpeg-python library for FFmpeg integration | Accepted | Pythonic API, faster development, fallback capability |
+| **ADR-002** | Use Python asyncio for batch processing concurrency | Accepted | Optimal for I/O-bound workloads, configurable concurrency |
+| **ADR-003** | Support TXT and SRT formats in MVP; defer VTT/JSON | Accepted | Reduced scope, covers 90% use cases |
+
+### 6.2 ADR-001: FFmpeg Integration Approach
+
+**Decision**: Use `ffmpeg-python` library as the primary FFmpeg wrapper.
+
+**Context**: Need to extract audio from MKV video files reliably. Team has Python expertise but limited FFmpeg experience.
+
+**Rationale**:
+- Pythonic interface matches team skills (method chaining, Python exceptions)
+- Abstracts command construction complexity
+- Allows fallback to direct FFmpeg calls via `.run()` for edge cases
+- Better MKV support than higher-level alternatives (pydub)
+
+**Trade-offs**:
+- Added library dependency
+- Team must learn both library API and FFmpeg concepts
+- Possible version incompatibilities
+
+**Alternatives Rejected**:
+- Direct subprocess: Slower development, more security risk
+- pydub: Limited control for complex MKV containers
+
+**Related**: See Section 9.2 for FFmpeg installation risk mitigation.
+
+### 6.3 ADR-002: Batch Processing Concurrency Model
+
+**Decision**: Use Python `asyncio` with configurable semaphore (default: 5 concurrent requests).
+
+**Context**: Batch processing multiple files requires concurrent API calls while respecting rate limits.
+
+**Rationale**:
+- I/O-bound workload (API calls) optimal for async
+- Standard library (no additional dependencies)
+- OpenAI SDK supports async client
+- Semaphore provides fine-grained rate limiting
+
+**Performance Impact**:
+| Scenario | Sequential | Parallel (5) | Speedup |
+|----------|------------|--------------|---------|
+| 10 files (1 min each) | ~15 min | ~3 min | 5x |
+| 20 files (5 min each) | ~120 min | ~25 min | 4.8x |
+
+**Alternatives Rejected**:
+- ThreadPoolExecutor: Less efficient for I/O-bound work
+- multiprocessing: Overkill, unnecessary process overhead
+
+### 6.4 ADR-003: Output Format Support
+
+**Decision**: MVP supports TXT and SRT only. VTT and JSON deferred to v2.
+
+**Context**: Users need transcripts in various formats. Timeline is 1-3 months.
+
+**Rationale**:
+- TXT covers 80% of use cases (documentation, notes)
+- SRT enables subtitle use case (video editing, accessibility)
+- Whisper API provides timestamps at no extra cost
+- VTT/JSON are incremental after SRT (low v2 effort)
+
+**Trade-offs**:
+- Users wanting VTT must wait for v2
+- JSON consumers must parse TXT/SRT
+
+**Extensibility**: OutputFormatter abstract class enables easy addition of new formats.
+
+---
+
+## 7. Technology Stack
+
+### 7.1 Core Technologies
+
+| Layer | Technology | Version | Rationale |
+|-------|------------|---------|-----------|
+| **Language** | Python | 3.9+ | Rich ecosystem, cross-platform, team expertise |
+| **CLI Framework** | click | 8.x | Mature, widely adopted, auto-help generation |
+| **Audio Processing** | ffmpeg-python | 0.2.x | Pythonic FFmpeg wrapper per ADR-001 |
+| **External Binary** | FFmpeg | 4.0+ | Industry-standard multimedia processing |
+| **Transcription API** | openai SDK | 1.x | Official SDK, async support, automatic retries |
+| **Progress Display** | rich | 13.x | Beautiful terminal UI, progress bars |
+| **Configuration** | pydantic | 2.x | Type-safe config, validation |
+| **Environment** | python-dotenv | 1.x | .env file support |
+| **Subtitle Format** | srt | 3.x | SRT parsing and generation |
+| **Async** | asyncio | stdlib | I/O-bound concurrency per ADR-002 |
+
+### 7.2 Development and Testing
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| pytest | 7.x | Unit and integration testing |
+| pytest-asyncio | 0.21+ | Async test support |
+| pytest-cov | 4.x | Code coverage reporting |
+| pytest-timeout | 2.x | Prevent hung async tests |
+| black | 23.x | Code formatting |
+| flake8 | 6.x | Linting |
+| mypy | 1.x | Type checking |
+| pip-audit | 2.x | Dependency security scanning |
+
+### 7.3 Dependency Manifest
+
+**Runtime Dependencies (requirements.txt)**:
+```
+openai>=1.0.0
+ffmpeg-python>=0.2.0
+click>=8.0.0
+rich>=13.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+srt>=3.5.0
+```
+
+**Development Dependencies (requirements-dev.txt)**:
+```
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+pytest-timeout>=2.0.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+pip-audit>=2.0.0
+```
+
+---
+
+## 8. Quality Attribute Tactics
+
+### 8.1 Performance Tactics
+
+| Tactic | Implementation | Target |
+|--------|----------------|--------|
+| **Async I/O** | asyncio for API calls | 5x batch speedup |
+| **Streaming** | FFmpeg stream copy (no re-encoding) | Fast extraction |
+| **Configurable Concurrency** | Semaphore-based limiting | Balance speed/rate limits |
+| **Lazy Loading** | Import heavy modules on demand | <1s startup time |
+| **Memory Efficiency** | Chunk-based processing | <512MB for any file size |
+
+### 8.2 Reliability Tactics
+
+| Tactic | Implementation | Target |
+|--------|----------------|--------|
+| **Retry Logic** | Exponential backoff (3 retries) | Handle transient failures |
+| **Error Isolation** | Per-file exception handling | Batch continues on failure |
+| **Checkpointing** | Save state after each chunk | Resume interrupted jobs |
+| **Input Validation** | Format detection, size checks | Fail fast on invalid input |
+| **Graceful Degradation** | Continue with partial results | Maximize successful output |
+
+### 8.3 Security Tactics
+
+| Tactic | Implementation | Target |
+|--------|----------------|--------|
+| **Secret Protection** | Environment variables, never logged | API key safety |
+| **Input Sanitization** | Path validation, extension whitelist | Prevent injection |
+| **Dependency Scanning** | pip-audit in CI | No known vulnerabilities |
+| **Minimal Permissions** | No elevated privileges required | Least privilege |
+| **HTTPS Enforcement** | OpenAI SDK enforces TLS 1.2+ | Secure transmission |
+| **Subprocess Security** | shell=False mandate, ffmpeg-python only | Prevent command injection |
+| **Secure Temp Files** | Unique naming, 0700 permissions | Prevent unauthorized access |
+
+### 8.4 Maintainability Tactics
+
+| Tactic | Implementation | Target |
+|--------|----------------|--------|
+| **Modular Design** | Clear component boundaries | Easy to modify/extend |
+| **Abstract Interfaces** | OutputFormatter protocol | Extensibility |
+| **Comprehensive Tests** | Unit + integration coverage | 60% coverage |
+| **Type Hints** | mypy type checking | Early error detection |
+| **Documentation** | Docstrings, README, ADRs | Developer onboarding |
+
+### 8.5 Usability Tactics
+
+| Tactic | Implementation | Target |
+|--------|----------------|--------|
+| **Sensible Defaults** | Zero-config first run | <10 min to first success |
+| **Progress Feedback** | rich progress bars | Never silent for >5s |
+| **Actionable Errors** | Context + suggestion | Self-service troubleshooting |
+| **Help Generation** | click auto-help | `--help` for all commands |
+| **Verbose Mode** | `--verbose` flag | Debug visibility |
+
+---
+
+## 9. Risks and Mitigations
+
+### 9.1 Architectural Risk Summary
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| **FFmpeg Installation Barrier** | High | Medium | Detailed docs, startup validation, helpful errors |
+| **Large File Chunking Complexity** | Medium | High | Fixed-time chunks, checkpoint/resume, test extensively |
+| **API Rate Limits** | Medium | Medium | Exponential backoff, configurable concurrency |
+| **Timestamp Drift in Chunks** | Medium | Medium | Precise offset calculation, boundary testing |
+| **Cross-Platform Compatibility** | Medium | Medium | Test on all platforms, pathlib usage |
+
+### 9.2 Risk Mitigation Details
+
+**RISK-002: FFmpeg Installation Barrier**
+
+Architecture Response:
+- Startup validation with clear error message
+- Platform-specific installation documentation
+- Windows-specific guide as priority deliverable
+- FFmpeg version check with upgrade suggestions
+
+**RISK-003: Large File Handling**
+
+Architecture Response:
+- Time-based chunking (40-min segments)
+- FFmpeg segment command for efficiency
+- Checkpoint file after each chunk
+- Resume flag for interrupted jobs
+- Timestamp offset calculation with validation
+
+**RISK-008: API Rate Limits**
+
+Architecture Response:
+- Semaphore-based concurrency control
+- Configurable limit (default: 5, adjustable)
+- Exponential backoff retry (2^attempt seconds)
+- Clear rate limit error messages
+
+---
+
+## 10. Implementation Guidelines
+
+### 10.1 Coding Standards
+
+| Standard | Tool | Configuration |
+|----------|------|---------------|
+| **Code Formatting** | black | Default settings (line length 88) |
+| **Linting** | flake8 | E501 ignored (black handles line length) |
+| **Type Checking** | mypy | Strict mode enabled |
+| **Docstrings** | Google style | Required for public interfaces |
+| **Imports** | isort | Compatible with black |
+
+### 10.2 Testing Strategy
+
+| Test Type | Coverage Target | Focus Areas |
+|-----------|-----------------|-------------|
+| **Unit Tests** | 70% | Core modules: transcriber, extractor, formatter |
+| **Integration Tests** | 50% | CLI commands, workflow pipelines |
+| **Mock Strategy** | All external calls | FFmpeg subprocess, OpenAI API |
+
+**Test Coverage Targets by Component**:
+
+| Component | Target | Rationale |
+|-----------|--------|-----------|
+| Output Formatter | 90% | Pure logic, easy to test |
+| Transcription Client | 80% | Mock API, test error handling |
+| Audio Extractor | 70% | Mock FFmpeg, test command generation |
+| Batch Processor | 60% | Complex async, test orchestration |
+| CLI Commands | 60% | Use CliRunner for integration |
+| Config Manager | 80% | Validation edge cases |
+
+**CLI Layer Coverage Scope**:
+- 60% target applies to CLI command logic (argument parsing, orchestration)
+- End-to-end integration tests (CliRunner) count toward both CLI and underlying module coverage
+- Core module coverage is measured independently
+
+#### 10.2.1 Test Data and Fixtures
+
+**Sample File Requirements**:
+
+| Category | Files | Specifications |
+|----------|-------|----------------|
+| **Small Audio** | sample-5min.mp3, sample-5min.flac | <5MB, clear speech, English |
+| **Medium Audio** | sample-30min.mp3, sample-30min.wav | 10-20MB, various bitrates |
+| **Large Audio** | sample-90min.mp3 (45MB), sample-3hr.mp3 (100MB) | Test chunking logic |
+| **Video Files** | sample-short.mkv, sample-long.mkv | <10MB, >50MB for extraction |
+| **Edge Cases** | exact-25mb.mp3, corrupted.mp3, unsupported.xyz | Boundary and error testing |
+
+**Fixture Generation**:
+- Use `ffmpeg -f lavfi -i sine=frequency=440:duration=300 -ab 192k sample-5min.mp3` for synthetic audio
+- Store golden transcripts: `tests/fixtures/golden/sample-5min.txt` for regression testing
+- Document checksums for large files (verify download integrity)
+- Large files (>10MB) stored externally with download script in `tests/fixtures/download_large_fixtures.py`
+
+**Mock API Responses**:
+- Location: `tests/fixtures/api-responses/`
+- Include: `success.json`, `rate-limit-429.json`, `server-error-500.json`, `invalid-file.json`
+- Structure matches OpenAI Whisper API response format
+
+#### 10.2.2 Async Testing Patterns
+
+**pytest-asyncio Configuration**:
+
+```python
+# conftest.py
+import pytest
+from unittest.mock import AsyncMock
+from openai import AsyncOpenAI
+
+@pytest.fixture
+def event_loop_policy():
+    """Set event loop policy for consistent behavior."""
+    import asyncio
+    return asyncio.DefaultEventLoopPolicy()
+
+@pytest.fixture
+def mock_openai_client():
+    """Mock async OpenAI client for transcriber tests."""
+    client = AsyncMock(spec=AsyncOpenAI)
+    client.audio.transcriptions.create = AsyncMock(
+        return_value=load_fixture("api-responses/success.json")
+    )
+    return client
+
+@pytest.fixture
+def mock_rate_limited_client():
+    """Mock client that returns 429 on first call, success on retry."""
+    client = AsyncMock(spec=AsyncOpenAI)
+    call_count = 0
+    async def rate_limit_then_success(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RateLimitError("Rate limit exceeded")
+        return load_fixture("api-responses/success.json")
+    client.audio.transcriptions.create = rate_limit_then_success
+    return client
+```
+
+**Concurrency Testing**:
+- Test batch semaphore limits: Verify max 5 concurrent tasks
+- Test rate limit backoff: Mock 429 responses, verify exponential delays
+- Test interruption handling: Inject cancellation signals during async tasks
+- Test error isolation: Verify failure in one task doesn't affect others
+
+**Integration with CI**:
+- Use `pytest-timeout` to prevent hung async tests (default: 60s per test)
+- Set event loop policy in conftest.py for consistent behavior across platforms
+- Mark slow tests with `@pytest.mark.slow` for optional exclusion
+
+**External Dependency Mocking Strategy**:
+
+| Dependency | Unit Tests | Integration Tests | CI Environment |
+|------------|------------|-------------------|----------------|
+| FFmpeg | Mock ffmpeg-python | Real FFmpeg | Install via apt |
+| OpenAI API | Mock openai.AsyncClient | Mock (or limited real calls) | Mock only |
+| File System | Mock pathlib/utils | Real temp directories | Real filesystem |
+
+### 10.3 Error Handling Patterns
+
+**Hierarchy**:
+```
+TranscribeError (base)
+|-- ConfigurationError
+|   |-- MissingApiKeyError
+|   |-- InvalidConfigError
+|-- FileError
+|   |-- FileNotFoundError
+|   |-- UnsupportedFormatError
+|   |-- CorruptedFileError
+|-- ExtractionError
+|   |-- FFmpegNotFoundError
+|   |-- FFmpegExecutionError
+|-- TranscriptionError
+|   |-- ApiError
+|   |-- RateLimitError
+|   |-- TimeoutError
+|-- OutputError
+    |-- WritePermissionError
+```
+
+**Error Message Pattern**:
+```
+ERROR: {What happened}
+
+{Why it happened (if known)}
+
+Suggested fix:
+  {Actionable steps}
+
+For more help: transcribe --help or docs/TROUBLESHOOTING.md
+```
+
+**Error Message Security Requirements**:
+1. Production error messages MUST NOT include:
+   - Full file system paths (use relative paths from working directory)
+   - Stack traces (reserve for --verbose mode only)
+   - API response bodies beyond status code and message
+   - Internal function names or line numbers
+
+2. All exceptions caught at CLI boundary MUST be sanitized before display
+3. API errors MUST redact any request data echoed in response
+
+**Error Testing Matrix**:
+
+| Error Type | Test Trigger | Validation |
+|------------|--------------|------------|
+| MissingApiKeyError | Unset OPENAI_API_KEY | Error message includes setup docs link |
+| FFmpegNotFoundError | Mock shutil.which() to return None | Error message includes platform-specific install link |
+| RateLimitError | Mock 429 response | Verify retry with exponential backoff |
+| TimeoutError | Mock API delay >60s | Verify graceful timeout message |
+| CorruptedFileError | Provide malformed audio fixture | Clean error message, no crash, no path leak |
+| UnsupportedFormatError | Provide .xyz file | Clear message listing supported formats |
+| WritePermissionError | Mock permission denied | Suggest chmod or alternate output path |
+
+### 10.4 CI/CD Test Pipeline
+
+**GitHub Actions Workflow**:
+```yaml
+name: Test Suite
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Verify FFmpeg
+        run: ffmpeg -version
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run linting
+        run: |
+          black --check src/ tests/
+          flake8 src/ tests/
+          mypy src/
+
+      - name: Run tests with coverage
+        run: pytest --cov=src --cov-report=xml --cov-report=term --cov-fail-under=60
+
+      - name: Security audit
+        run: pip-audit
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FFmpeg
+        run: brew install ffmpeg
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install and test
+        run: |
+          pip install -r requirements-dev.txt
+          pip install -e .
+          pytest tests/ -v
+
+  # Windows testing is manual due to FFmpeg PATH complexity
+  # See docs/INSTALL_WINDOWS_FFMPEG.md for setup
+```
+
+**Test Matrix**:
+- Python versions: 3.9, 3.10, 3.11, 3.12
+- OS: Ubuntu (primary CI), macOS (secondary CI), Windows (manual)
+- Coverage threshold: 60% minimum, fail CI if below
+
+### 10.5 Logging Strategy
+
+| Level | Usage |
+|-------|-------|
+| **DEBUG** | Detailed execution trace (enabled with --verbose) |
+| **INFO** | Progress updates, completion messages (default) |
+| **WARNING** | Non-fatal issues (e.g., fallback to conversion) |
+| **ERROR** | Operation failures with context |
+
+**Security**: API keys are never logged. Use `[REDACTED]` placeholder. File paths in logs use relative paths from working directory.
+
+### 10.6 Security Implementation Guidelines
+
+#### 10.6.1 Input Validation Requirements
+
+1. **Path Canonicalization**: All file paths MUST be resolved to absolute paths using `pathlib.Path.resolve()` before processing. Reject paths containing null bytes.
+
+2. **Directory Traversal Prevention**: Reject any path that, after canonicalization, resolves outside the current working directory or specified input directory.
+
+3. **Extension Whitelist**: Validate file extensions against allowed list:
+   ```python
+   AUDIO_EXTENSIONS = {'.mp3', '.aac', '.flac', '.wav', '.m4a'}
+   VIDEO_EXTENSIONS = {'.mkv', '.mp4', '.mov', '.avi'}
+   ALLOWED_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+   ```
+
+4. **File Signature Validation**: Use python-magic or similar to verify file type matches extension before processing. Reject mismatches with clear error message.
+
+#### 10.6.2 Secure Temporary File Handling
+
+1. Use `tempfile.mkdtemp()` with prefix unique to process (include PID and random suffix)
+2. Set directory permissions to 0700 immediately after creation
+3. Implement try/finally cleanup pattern in addition to atexit handler
+4. For checkpoint files, store only relative paths from working directory, not absolute paths
+
+```python
+import tempfile
+import os
+import atexit
+
+def create_secure_temp_dir() -> Path:
+    """Create secure temporary directory with proper permissions."""
+    temp_dir = Path(tempfile.mkdtemp(prefix=f"transcribe-{os.getpid()}-"))
+    os.chmod(temp_dir, 0o700)  # Owner read/write/execute only
+    atexit.register(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+    return temp_dir
+```
+
+#### 10.6.3 Subprocess Security Requirements
+
+1. ALL subprocess calls MUST use `shell=False` (list-based arguments)
+2. `ffmpeg-python` library is REQUIRED for FFmpeg operations (no direct subprocess)
+3. Any future subprocess additions require security review
+4. Static analysis check for `shell=True` in CI pipeline (flake8-bandit)
+
+#### 10.6.4 Configuration File Security
+
+1. Config files (`~/.transcriberc`) MUST have permissions 600 or more restrictive
+2. Reject config files with world-readable permissions with clear error message
+3. Use YAML `safe_load()` exclusively (never `load()`)
+4. Validate all config values against expected types and ranges using pydantic
+
+### 10.7 Integration Expectations
+
+**OpenAI API Integration**:
+```python
+# Request pattern
+response = await client.audio.transcriptions.create(
+    model="whisper-1",
+    file=audio_file,
+    response_format="verbose_json",  # For timestamps
+    timestamp_granularity="segment"
+)
+
+# Response handling
+result = TranscriptionResult(
+    text=response.text,
+    segments=[Segment(**s) for s in response.segments],
+    language=response.language,
+    duration=response.duration
+)
+```
+
+**FFmpeg Integration**:
+```python
+# Extraction pattern (via ffmpeg-python, never direct subprocess)
+import ffmpeg
+
+stream = ffmpeg.input(video_path)
+stream = stream.output(audio_path, acodec='libmp3lame', audio_bitrate='192k')
+stream.run(overwrite_output=True, quiet=True)
+
+# Chunking pattern
+stream = ffmpeg.input(audio_path)
+stream = stream.output(
+    f'chunk_%03d.mp3',
+    f='segment',
+    segment_time=2400,  # 40 minutes
+    c='copy'
+)
+stream.run(overwrite_output=True, quiet=True)
+```
+
+---
+
+## 11. Outstanding Issues
+
+### 11.1 Open Questions
+
+| ID | Question | Impact | Target Resolution |
+|----|----------|--------|-------------------|
+| **OQ-001** | CLI Framework: click vs typer? | Developer experience | Week 2 - Tech Lead decision |
+| **OQ-002** | FFmpeg minimum version requirement | Platform support | Week 2 - Test across versions |
+| **OQ-003** | Chunk overlap strategy for seamless transcripts | Quality at boundaries | Sprint 4 - Validate with testing |
+| **OQ-004** | Resume implementation: file hash vs timestamp? | Resume reliability | Sprint 4 - Technical spike |
+
+### 11.2 Pending Validations
+
+| Validation | Status | Owner |
+|------------|--------|-------|
+| FFmpeg extraction quality for MKV files | Pending | Development team (Sprint 1) |
+| Whisper API timestamp accuracy | Pending | Development team (Sprint 2) |
+| Chunk boundary transcription quality | Pending | Test team (Sprint 4) |
+| Cross-platform path handling | Pending | Development team (ongoing) |
+
+### 11.3 Experiments Required
+
+| Experiment | Purpose | Timeline |
+|------------|---------|----------|
+| **FFmpeg PoC** | Validate extraction from various MKV sources | Sprint 1 |
+| **Chunking PoC** | Test fixed-time vs silence-based splitting | Sprint 4 |
+| **Large File Test** | Validate 2-3 hour file processing | Sprint 4 |
+| **Rate Limit Test** | Determine optimal concurrency for team's API tier | Sprint 3 |
+
+---
+
+## 12. Appendices
+
+### Appendix A: Glossary
+
+| Term | Definition |
+|------|------------|
+| **ADR** | Architecture Decision Record - documented architectural decision with context and rationale |
+| **CLI** | Command-Line Interface - text-based user interface |
+| **FFmpeg** | Free, open-source multimedia framework for audio/video processing |
+| **MKV** | Matroska Video - open-source video container format |
+| **MVP** | Minimum Viable Product - initial release with core functionality |
+| **SAD** | Software Architecture Document - this document |
+| **SLA** | Service Level Agreement - formal commitment on service quality |
+| **SRT** | SubRip Subtitle - text-based subtitle format with timestamps |
+| **VTT** | WebVTT - Web Video Text Tracks format for HTML5 video |
+| **Whisper** | OpenAI's automatic speech recognition system |
+
+### Appendix B: Component Diagram (ASCII)
+
+```
++-------------------------------------------------------------------+
+|                        TRANSCRIBE-CLI                             |
+|                                                                   |
+|  +------------+  +------------+  +------------+  +------------+   |
+|  |    CLI     |  |    CORE    |  |   OUTPUT   |  |   CONFIG   |   |
+|  |------------|  |------------|  |------------|  |------------|   |
+|  | main.py    |  | extractor  |  | formatter  |  | settings   |   |
+|  | commands/* |  | transcriber|  | txt.py     |  | validators |   |
+|  |            |  | chunker    |  | srt.py     |  | defaults   |   |
+|  |            |  | processor  |  |            |  |            |   |
+|  +-----+------+  +-----+------+  +-----+------+  +-----+------+   |
+|        |               |               |               |          |
+|        +-------+-------+-------+-------+-------+-------+          |
+|                |                                                  |
+|         +------+------+                                           |
+|         |    UTILS    |                                           |
+|         |-------------|                                           |
+|         | file_utils  |                                           |
+|         | progress    |                                           |
+|         | logging     |                                           |
+|         | errors      |                                           |
+|         +-------------+                                           |
+|                                                                   |
++-------------------------------------------------------------------+
+        |                       |
+        v                       v
++---------------+       +---------------+
+|    FFmpeg     |       |  OpenAI API   |
+|   (binary)    |       |   (HTTPS)     |
++---------------+       +---------------+
+```
+
+### Appendix C: ADR Reference Index
+
+| ADR | Title | Status | Location |
+|-----|-------|--------|----------|
+| ADR-001 | FFmpeg Integration Approach | Accepted | `/home/manitcor/dev/tnf/.aiwg/architecture/adr/ADR-001-ffmpeg-integration-approach.md` |
+| ADR-002 | Batch Processing Concurrency Model | Accepted | `/home/manitcor/dev/tnf/.aiwg/architecture/adr/ADR-002-batch-processing-concurrency.md` |
+| ADR-003 | Output Format Support | Accepted | `/home/manitcor/dev/tnf/.aiwg/architecture/adr/ADR-003-output-format-support.md` |
+
+### Appendix D: Use Case Reference Index
+
+| UC | Title | Priority | Location |
+|----|-------|----------|----------|
+| UC-001 | Transcribe Single Audio File | P0 | `/home/manitcor/dev/tnf/.aiwg/requirements/use-case-briefs/UC-001-transcribe-single-audio-file.md` |
+| UC-002 | Extract and Transcribe Video File | P0 | `/home/manitcor/dev/tnf/.aiwg/requirements/use-case-briefs/UC-002-extract-and-transcribe-video-file.md` |
+| UC-003 | Batch Process Directory | P0 | `/home/manitcor/dev/tnf/.aiwg/requirements/use-case-briefs/UC-003-batch-process-directory.md` |
+| UC-004 | Handle Large File | P1 | `/home/manitcor/dev/tnf/.aiwg/requirements/use-case-briefs/UC-004-handle-large-file.md` |
+| UC-005 | Generate Timestamped Output | P1 | `/home/manitcor/dev/tnf/.aiwg/requirements/use-case-briefs/UC-005-generate-timestamped-output.md` |
+
+### Appendix E: Related Documents
+
+| Document | Location |
+|----------|----------|
+| Project Intake | `/home/manitcor/dev/tnf/.aiwg/intake/project-intake.md` |
+| Solution Profile | `/home/manitcor/dev/tnf/.aiwg/intake/solution-profile.md` |
+| Vision Document | `/home/manitcor/dev/tnf/.aiwg/requirements/vision-document.md` |
+| Risk List | `/home/manitcor/dev/tnf/.aiwg/risks/risk-list.md` |
+| Architecture Sketch | `/home/manitcor/dev/tnf/.aiwg/architecture/architecture-sketch.md` |
+
+---
+
+## Sign-Off
+
+**Required Approvals:**
+- [x] Security Architect: APPROVED - 2025-12-04 (7/10 CONDITIONAL, elevated to APPROVED after RC-1 through RC-4 incorporated)
+- [x] Test Architect: APPROVED - 2025-12-04 (7/10 CONDITIONAL, elevated to APPROVED after Sections 10.2.1, 10.2.2, 10.3, 10.4 added)
+- [x] Requirements Analyst: APPROVED - 2025-12-04 (9/10)
+- [x] Technical Writer: APPROVED - 2025-12-04 (8.5/10)
+
+**Conditions Addressed:**
+1. RC-1 (Input Validation): Added Section 10.6.1 - COMPLETE
+2. RC-2 (Temp File Security): Added Section 10.6.2 - COMPLETE
+3. RC-3 (Error Message Security): Added to Section 10.3 - COMPLETE
+4. RC-4 (Subprocess Security): Added Section 10.6.3 - COMPLETE
+5. Test Data Strategy: Added Section 10.2.1 - COMPLETE
+6. Async Testing Patterns: Added Section 10.2.2 - COMPLETE
+7. Error Testing Matrix: Enhanced Section 10.3 - COMPLETE
+8. CI/CD Pipeline: Added Section 10.4 - COMPLETE
+
+**Outstanding Concerns:**
+None - all required changes have been incorporated.
+
+---
+
+## Version History
+
+| Version | Date | Author | Changes |
+|---------|------|--------|---------|
+| 0.1 | 2025-12-04 | Architecture Designer Agent | Initial draft for multi-agent review |
+| 1.0 | 2025-12-04 | Documentation Synthesizer Agent | Baseline version incorporating all reviewer feedback |
+
+---
+
+**Document Status**: BASELINED
+
+**Next Steps**:
+1. Architecture Baseline Plan update to reference this SAD
+2. Master Test Plan development based on Section 10.2-10.4
+3. Implementation kickoff using Section 10 guidelines
+4. Security testing per Section 10.6 requirements
+
+---
+
+**Document End**

@@ -1,0 +1,198 @@
+"""Main CLI entry point for transcribe-cli.
+
+Implements ADR-004: CLI Framework Selection (Typer)
+- Type-hint based argument parsing
+- Rich integration for progress display
+- Subcommands for different operations
+"""
+
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+
+from transcribe_cli import __version__
+
+app = typer.Typer(
+    name="transcribe",
+    help="Transcribe audio and video files using OpenAI Whisper API.",
+    add_completion=False,
+    rich_markup_mode="rich",
+)
+console = Console()
+
+
+def version_callback(value: bool) -> None:
+    """Display version and exit."""
+    if value:
+        console.print(f"transcribe-cli version {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show version and exit.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Audio Transcription CLI Tool.
+
+    Transcribe audio and video files using OpenAI Whisper API.
+    Supports batch processing, multiple output formats, and large files.
+    """
+    pass
+
+
+@app.command()
+def transcribe(
+    file: Path = typer.Argument(
+        ...,
+        help="Audio or video file to transcribe.",
+        exists=True,
+        readable=True,
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for transcript. Defaults to current directory.",
+    ),
+    format: str = typer.Option(
+        "txt",
+        "--format",
+        "-f",
+        help="Output format: txt, srt",
+    ),
+    language: str = typer.Option(
+        "auto",
+        "--language",
+        "-l",
+        help="Language code (e.g., 'en', 'es') or 'auto' for detection.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Enable verbose output.",
+    ),
+) -> None:
+    """Transcribe a single audio or video file.
+
+    Examples:
+        transcribe audio.mp3
+        transcribe video.mkv --format srt
+        transcribe recording.wav --output-dir ./transcripts
+    """
+    console.print(f"[bold blue]Transcribing:[/bold blue] {file}")
+    # TODO: Implement transcription logic in Sprint 3
+    console.print("[yellow]Transcription not yet implemented.[/yellow]")
+
+
+@app.command()
+def extract(
+    file: Path = typer.Argument(
+        ...,
+        help="Video file to extract audio from.",
+        exists=True,
+        readable=True,
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output audio file path.",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Enable verbose output.",
+    ),
+) -> None:
+    """Extract audio from a video file without transcribing.
+
+    Examples:
+        transcribe extract video.mkv
+        transcribe extract video.mp4 --output audio.mp3
+    """
+    console.print(f"[bold blue]Extracting audio from:[/bold blue] {file}")
+    # TODO: Implement extraction logic in Sprint 2
+    console.print("[yellow]Extraction not yet implemented.[/yellow]")
+
+
+@app.command()
+def batch(
+    directory: Path = typer.Argument(
+        ...,
+        help="Directory containing audio/video files.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+    output_dir: Optional[Path] = typer.Option(
+        None,
+        "--output-dir",
+        "-o",
+        help="Output directory for transcripts.",
+    ),
+    format: str = typer.Option(
+        "txt",
+        "--format",
+        "-f",
+        help="Output format: txt, srt",
+    ),
+    concurrency: int = typer.Option(
+        5,
+        "--concurrency",
+        "-c",
+        help="Maximum concurrent transcriptions (1-20).",
+        min=1,
+        max=20,
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Enable verbose output.",
+    ),
+) -> None:
+    """Batch transcribe all audio/video files in a directory.
+
+    Examples:
+        transcribe batch ./recordings
+        transcribe batch ./videos --format srt --concurrency 3
+    """
+    console.print(f"[bold blue]Batch processing:[/bold blue] {directory}")
+    # TODO: Implement batch logic in Sprint 4
+    console.print("[yellow]Batch processing not yet implemented.[/yellow]")
+
+
+@app.command()
+def config(
+    show: bool = typer.Option(
+        False,
+        "--show",
+        help="Show current configuration.",
+    ),
+) -> None:
+    """Manage configuration settings.
+
+    Examples:
+        transcribe config --show
+    """
+    if show:
+        console.print("[bold]Current Configuration:[/bold]")
+        console.print("  OPENAI_API_KEY: [dim](set via environment)[/dim]")
+        console.print("  Output format: txt")
+        console.print("  Concurrency: 5")
+        # TODO: Load and display actual settings
+    else:
+        console.print("Use --show to display current configuration.")
+        console.print("Set OPENAI_API_KEY environment variable for API access.")
+
+
+if __name__ == "__main__":
+    app()
