@@ -57,10 +57,10 @@ dev = [
 transcribe = "transcribe_cli.cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/example/transcribe-cli"
-Documentation = "https://github.com/example/transcribe-cli#readme"
-Repository = "https://github.com/example/transcribe-cli"
-Issues = "https://github.com/example/transcribe-cli/issues"
+Homepage = "https://github.com/jmagly/transcribe-cli"
+Documentation = "https://github.com/jmagly/transcribe-cli#readme"
+Repository = "https://github.com/jmagly/transcribe-cli"
+Issues = "https://github.com/jmagly/transcribe-cli/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/transcribe_cli"]

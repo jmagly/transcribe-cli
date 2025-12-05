@@ -104,8 +104,22 @@ Options:
   -o, --output-dir PATH   Output directory
   -f, --format TEXT       Output format: txt, srt
   -c, --concurrency INT   Max concurrent jobs (1-20, default: 5)
+  -r, --recursive         Scan subdirectories
+  --dry-run               Preview files without processing
   --verbose               Enable verbose output
   --help                  Show help message
+```
+
+**Examples:**
+```bash
+# Preview what would be processed
+transcribe batch ./recordings --dry-run
+
+# Process subdirectories
+transcribe batch ./media --recursive
+
+# Combine options
+transcribe batch ./videos --recursive --format srt --concurrency 3
 ```
 
 ### Extract Command
@@ -115,13 +129,56 @@ transcribe extract <file> [OPTIONS]
 
 Options:
   -o, --output PATH       Output audio file path
+  -f, --format TEXT       Output format: mp3, wav (default: mp3)
   --verbose               Enable verbose output
   --help                  Show help message
 ```
 
+### Config Command
+
+```bash
+transcribe config [OPTIONS]
+
+Options:
+  --show        Show current configuration
+  --init        Create default config file
+  --locations   Show config file search paths
+  --help        Show help message
+```
+
 ## Configuration
 
-Settings can be configured via environment variables:
+### Config File
+
+Create a `transcribe.toml` file in your project directory:
+
+```bash
+transcribe config --init
+```
+
+Example configuration:
+```toml
+[output]
+format = "txt"
+
+[processing]
+concurrency = 5
+language = "auto"
+recursive = false
+
+[logging]
+verbose = false
+```
+
+Config files are searched in this order:
+1. `./transcribe.toml`
+2. `./.transcriberc`
+3. `~/.config/transcribe/config.toml`
+4. `~/.transcriberc`
+
+### Environment Variables
+
+Settings can also be configured via environment variables:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
