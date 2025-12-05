@@ -7,9 +7,9 @@ Implements ADR-005: Configuration Management Strategy
 """
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     )
 
     # API Configuration (required, no default)
-    openai_api_key: SecretStr
+    # Uses OPENAI_API_KEY (no prefix) for compatibility with OpenAI conventions
+    openai_api_key: SecretStr = Field(validation_alias="OPENAI_API_KEY")
 
     # Output settings
     output_dir: Path = Path(".")
