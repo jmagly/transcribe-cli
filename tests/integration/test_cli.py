@@ -268,6 +268,38 @@ class TestBatchCommand:
         assert result.exit_code == 0
         assert "No audio/video files" in result.stdout
 
+    def test_batch_dry_run(self, tmp_path: Path) -> None:
+        """batch --dry-run should preview files without processing."""
+        (tmp_path / "audio1.mp3").write_bytes(b"fake1")
+        (tmp_path / "audio2.mp3").write_bytes(b"fake2")
+
+        result = runner.invoke(app, ["batch", str(tmp_path), "--dry-run"])
+        assert result.exit_code == 0
+        assert "DRY RUN" in result.stdout
+        assert "audio1.mp3" in result.stdout
+        assert "audio2.mp3" in result.stdout
+        assert "Would process 2 files" in result.stdout
+
+    def test_batch_recursive_flag(self, tmp_path: Path) -> None:
+        """batch --recursive should show recursive indicator."""
+        (tmp_path / "audio.mp3").write_bytes(b"fake")
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        (subdir / "nested.mp3").write_bytes(b"nested")
+
+        result = runner.invoke(app, ["batch", str(tmp_path), "--recursive", "--dry-run"])
+        assert result.exit_code == 0
+        assert "recursive" in result.stdout.lower()
+        assert "nested.mp3" in result.stdout
+
+    def test_batch_shows_total_size(self, tmp_path: Path) -> None:
+        """batch should show total file size."""
+        (tmp_path / "audio.mp3").write_bytes(b"x" * 1024)  # 1KB
+
+        result = runner.invoke(app, ["batch", str(tmp_path), "--dry-run"])
+        assert result.exit_code == 0
+        assert "MB" in result.stdout  # Shows size in MB
+
     def test_batch_invalid_format(self, tmp_path: Path) -> None:
         """batch should reject invalid output formats."""
         (tmp_path / "audio.mp3").write_bytes(b"fake")
@@ -341,3 +373,42 @@ class TestBatchCommand:
         with patch("transcribe_cli.core.process_directory", return_value=mock_summary):
             result = runner.invoke(app, ["batch", str(tmp_path)])
             assert "3 file" in result.stdout
+
+
+class TestConfigCommand:
+    """Tests for config command."""
+
+    def test_config_show(self) -> None:
+        """config --show should display configuration."""
+        result = runner.invoke(app, ["config", "--show"])
+        assert result.exit_code == 0
+        assert "Current Configuration" in result.stdout
+
+    def test_config_locations(self) -> None:
+        """config --locations should show search paths."""
+        result = runner.invoke(app, ["config", "--locations"])
+        assert result.exit_code == 0
+        assert "Config file locations" in result.stdout
+
+    def test_config_init_creates_file(self, tmp_path: Path, monkeypatch) -> None:
+        """config --init should create config file."""
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["config", "--init"])
+        assert result.exit_code == 0
+        assert "Created config file" in result.stdout
+        assert (tmp_path / "transcribe.toml").exists()
+
+    def test_config_init_fails_if_exists(self, tmp_path: Path, monkeypatch) -> None:
+        """config --init should fail if config already exists."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "transcribe.toml").write_text("existing")
+        result = runner.invoke(app, ["config", "--init"])
+        assert result.exit_code == 1
+        assert "already exists" in result.stdout
+
+    def test_config_no_flags_shows_help(self) -> None:
+        """config with no flags should show usage info."""
+        result = runner.invoke(app, ["config"])
+        assert result.exit_code == 0
+        assert "--show" in result.stdout
+        assert "--init" in result.stdout

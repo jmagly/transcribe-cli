@@ -292,6 +292,17 @@ def batch(
         min=1,
         max=20,
     ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        "-r",
+        help="Recursively scan subdirectories.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview files without processing (no API calls).",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -303,6 +314,7 @@ def batch(
     Examples:
         transcribe batch ./recordings
         transcribe batch ./videos --format srt --concurrency 3
+        transcribe batch ./media --recursive --dry-run
     """
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
@@ -319,19 +331,41 @@ def batch(
 
     # Scan directory first to show file count
     try:
-        files = scan_directory(directory)
+        files = scan_directory(directory, recursive=recursive)
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
 
     if not files:
         console.print(f"[yellow]No audio/video files found in:[/yellow] {directory}")
+        if recursive:
+            console.print("[dim]  (searched recursively)[/dim]")
+        raise typer.Exit(0)
+
+    # Calculate total size for display
+    total_size = sum(f.stat().st_size for f in files)
+    size_mb = total_size / (1024 * 1024)
+
+    console.print(f"[bold blue]Batch processing:[/bold blue] {directory}")
+    console.print(f"[dim]Found {len(files)} file(s) ({size_mb:.1f} MB total)[/dim]")
+    if recursive:
+        console.print("[dim]  (recursive scan)[/dim]")
+
+    # Dry run mode - show files and exit
+    if dry_run:
+        console.print()
+        console.print("[bold yellow]DRY RUN[/bold yellow] - No files will be processed")
+        console.print()
+        for f in files:
+            file_size = f.stat().st_size / (1024 * 1024)
+            rel_path = f.relative_to(directory) if recursive else f.name
+            console.print(f"  [dim]{rel_path}[/dim] ({file_size:.2f} MB)")
+        console.print()
+        console.print(f"[dim]Would process {len(files)} files with concurrency {concurrency}[/dim]")
+        console.print(f"[dim]Output format: {format}[/dim]")
         raise typer.Exit(0)
 
     try:
-
-        console.print(f"[bold blue]Batch processing:[/bold blue] {directory}")
-        console.print(f"[dim]Found {len(files)} file(s) to process[/dim]")
         console.print(f"[dim]Concurrency: {concurrency}[/dim]")
 
         if verbose:
@@ -374,6 +408,7 @@ def batch(
                 output_dir=output_dir,
                 output_format=format,  # type: ignore
                 concurrency=concurrency,
+                recursive=recursive,
                 progress_callback=update_progress,
             )
 
@@ -414,21 +449,87 @@ def config(
         "--show",
         help="Show current configuration.",
     ),
+    init: bool = typer.Option(
+        False,
+        "--init",
+        help="Create a default config file in current directory.",
+    ),
+    locations: bool = typer.Option(
+        False,
+        "--locations",
+        help="Show config file search locations.",
+    ),
 ) -> None:
     """Manage configuration settings.
 
     Examples:
         transcribe config --show
+        transcribe config --init
+        transcribe config --locations
     """
+    import os
+
+    from transcribe_cli.config import (
+        create_default_config,
+        find_config_file,
+        get_config_locations,
+        get_settings,
+    )
+
+    if init:
+        config_path = Path.cwd() / "transcribe.toml"
+        if config_path.exists():
+            console.print(f"[yellow]Config file already exists:[/yellow] {config_path}")
+            raise typer.Exit(1)
+        created = create_default_config(config_path)
+        console.print(f"[green]Created config file:[/green] {created}")
+        raise typer.Exit(0)
+
+    if locations:
+        console.print("[bold]Config file locations (checked in order):[/bold]")
+        active_config = find_config_file()
+        for loc in get_config_locations():
+            if loc == active_config:
+                console.print(f"  [green]✓[/green] {loc} [dim](active)[/dim]")
+            elif loc.exists():
+                console.print(f"  [yellow]•[/yellow] {loc} [dim](exists)[/dim]")
+            else:
+                console.print(f"  [dim]•[/dim] {loc}")
+        raise typer.Exit(0)
+
     if show:
         console.print("[bold]Current Configuration:[/bold]")
-        console.print("  OPENAI_API_KEY: [dim](set via environment)[/dim]")
-        console.print("  Output format: txt")
-        console.print("  Concurrency: 5")
-        # TODO: Load and display actual settings
+        console.print()
+
+        # Show config file status
+        active_config = find_config_file()
+        if active_config:
+            console.print(f"  [bold]Config file:[/bold] {active_config}")
+        else:
+            console.print("  [bold]Config file:[/bold] [dim]none (using defaults)[/dim]")
+        console.print()
+
+        # Show API key status
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
+            console.print(f"  [bold]OPENAI_API_KEY:[/bold] {masked}")
+        else:
+            console.print("  [bold]OPENAI_API_KEY:[/bold] [red]not set[/red]")
+        console.print()
+
+        # Show defaults
+        console.print("  [bold]Defaults:[/bold]")
+        console.print("    Output format: txt")
+        console.print("    Concurrency: 5")
+        console.print("    Language: auto")
+        console.print("    Recursive: false")
     else:
-        console.print("Use --show to display current configuration.")
-        console.print("Set OPENAI_API_KEY environment variable for API access.")
+        console.print("Use [bold]--show[/bold] to display current configuration.")
+        console.print("Use [bold]--init[/bold] to create a config file.")
+        console.print("Use [bold]--locations[/bold] to see config file search paths.")
+        console.print()
+        console.print("[dim]Set OPENAI_API_KEY environment variable for API access.[/dim]")
 
 
 if __name__ == "__main__":
