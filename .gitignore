@@ -43,3 +43,22 @@ htmlcov/
 *.tmp
 *.temp
 .transcribe_checkpoint_*
+
+# Test files (real media files for manual testing)
+.testfiles/
+
+# Output files from transcription
+*.transcript.txt
+*.transcript.srt
+
+# Log files
+*.log
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python packaging
+*.whl
+MANIFEST
