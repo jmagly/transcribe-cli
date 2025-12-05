@@ -1,5 +1,12 @@
 """Core processing modules for transcribe-cli."""
 
+from .batch import (
+    BatchResult,
+    BatchSummary,
+    process_batch,
+    process_directory,
+    scan_directory,
+)
 from .extractor import (
     AUDIO_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
@@ -58,6 +65,12 @@ __all__ = [
     "TranscriptionSegment",
     "transcribe_file",
     "save_transcript",
+    # Batch
+    "BatchResult",
+    "BatchSummary",
+    "process_batch",
+    "process_directory",
+    "scan_directory",
     # Constants
     "VIDEO_EXTENSIONS",
     "AUDIO_EXTENSIONS",

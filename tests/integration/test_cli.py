@@ -250,10 +250,94 @@ class TestTranscribeCommand:
         mock_result.duration = 1.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.core.save_transcript") as mock_save:
+            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
                 mock_save.return_value = output_dir / "audio.txt"
                 result = runner.invoke(
                     app, ["transcribe", str(fake_audio), "--output-dir", str(output_dir)]
                 )
                 # Verify output_dir was created
                 assert result.exit_code == 0
+
+
+class TestBatchCommand:
+    """Tests for batch command."""
+
+    def test_batch_empty_directory(self, tmp_path: Path) -> None:
+        """batch should handle empty directory gracefully."""
+        result = runner.invoke(app, ["batch", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "No audio/video files" in result.stdout
+
+    def test_batch_invalid_format(self, tmp_path: Path) -> None:
+        """batch should reject invalid output formats."""
+        (tmp_path / "audio.mp3").write_bytes(b"fake")
+        result = runner.invoke(app, ["batch", str(tmp_path), "--format", "pdf"])
+        assert result.exit_code == 1
+        assert "Unsupported format" in result.stdout
+
+    def test_batch_nonexistent_directory(self) -> None:
+        """batch should error on non-existent directory."""
+        result = runner.invoke(app, ["batch", "/nonexistent/directory"])
+        assert result.exit_code != 0
+
+    def test_batch_with_mock_success(self, tmp_path: Path) -> None:
+        """batch should process files with mocked transcription."""
+        # Create test files
+        (tmp_path / "audio1.mp3").write_bytes(b"fake1")
+        (tmp_path / "audio2.mp3").write_bytes(b"fake2")
+
+        from transcribe_cli.core.batch import BatchSummary, BatchResult
+
+        mock_summary = BatchSummary(
+            total_files=2,
+            successful=2,
+            failed=0,
+            skipped=0,
+            results=[
+                BatchResult(tmp_path / "audio1.mp3", tmp_path / "audio1.txt", True),
+                BatchResult(tmp_path / "audio2.mp3", tmp_path / "audio2.txt", True),
+            ],
+        )
+
+        with patch("transcribe_cli.core.process_directory", return_value=mock_summary):
+            result = runner.invoke(app, ["batch", str(tmp_path)])
+            assert result.exit_code == 0
+            assert "Successful" in result.stdout
+            assert "2" in result.stdout
+
+    def test_batch_with_failures(self, tmp_path: Path) -> None:
+        """batch should report failures correctly."""
+        (tmp_path / "audio.mp3").write_bytes(b"fake")
+
+        from transcribe_cli.core.batch import BatchSummary, BatchResult
+
+        mock_summary = BatchSummary(
+            total_files=1,
+            successful=0,
+            failed=1,
+            skipped=0,
+            results=[
+                BatchResult(tmp_path / "audio.mp3", None, False, error="API error"),
+            ],
+        )
+
+        with patch("transcribe_cli.core.process_directory", return_value=mock_summary):
+            result = runner.invoke(app, ["batch", str(tmp_path)])
+            assert result.exit_code == 1
+            assert "Failed" in result.stdout
+
+    def test_batch_shows_file_count(self, tmp_path: Path) -> None:
+        """batch should show number of files found."""
+        (tmp_path / "audio1.mp3").write_bytes(b"fake1")
+        (tmp_path / "audio2.mp3").write_bytes(b"fake2")
+        (tmp_path / "audio3.mp3").write_bytes(b"fake3")
+
+        from transcribe_cli.core.batch import BatchSummary
+
+        mock_summary = BatchSummary(
+            total_files=3, successful=3, failed=0, skipped=0, results=[]
+        )
+
+        with patch("transcribe_cli.core.process_directory", return_value=mock_summary):
+            result = runner.invoke(app, ["batch", str(tmp_path)])
+            assert "3 file" in result.stdout

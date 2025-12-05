@@ -100,16 +100,12 @@ def transcribe(
         transcribe_file,
     )
 
+    from transcribe_cli.output import save_formatted_transcript
+
     # Validate output format
     if format not in ("txt", "srt"):
         console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use 'txt' or 'srt'.")
         raise typer.Exit(1)
-
-    # SRT format not yet implemented
-    if format == "srt":
-        console.print("[yellow]SRT format will be available in a future release.[/yellow]")
-        console.print("[yellow]Using TXT format for now.[/yellow]")
-        format = "txt"
 
     try:
         # Show file info if verbose
@@ -134,6 +130,8 @@ def transcribe(
             output_dir = Path(output_dir).resolve()
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / f"{file.stem}.{format}"
+        else:
+            output_path = file.with_suffix(f".{format}")
 
         # Perform transcription
         with console.status("[bold green]Transcribing...[/bold green]"):
@@ -143,8 +141,8 @@ def transcribe(
                 language=language,
             )
 
-        # Save transcript
-        saved_path = save_transcript(result, output_path)
+        # Save transcript with formatter (supports SRT)
+        saved_path = save_formatted_transcript(result, output_path, format)  # type: ignore
 
         console.print(f"[green]Success![/green] Transcript saved to: {saved_path}")
         if verbose:
@@ -306,9 +304,107 @@ def batch(
         transcribe batch ./recordings
         transcribe batch ./videos --format srt --concurrency 3
     """
-    console.print(f"[bold blue]Batch processing:[/bold blue] {directory}")
-    # TODO: Implement batch logic in Sprint 4
-    console.print("[yellow]Batch processing not yet implemented.[/yellow]")
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
+    from transcribe_cli.core import (
+        APIKeyMissingError,
+        process_directory,
+        scan_directory,
+    )
+
+    # Validate output format
+    if format not in ("txt", "srt"):
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use 'txt' or 'srt'.")
+        raise typer.Exit(1)
+
+    # Scan directory first to show file count
+    try:
+        files = scan_directory(directory)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if not files:
+        console.print(f"[yellow]No audio/video files found in:[/yellow] {directory}")
+        raise typer.Exit(0)
+
+    try:
+
+        console.print(f"[bold blue]Batch processing:[/bold blue] {directory}")
+        console.print(f"[dim]Found {len(files)} file(s) to process[/dim]")
+        console.print(f"[dim]Concurrency: {concurrency}[/dim]")
+
+        if verbose:
+            for f in files:
+                console.print(f"[dim]  - {f.name}[/dim]")
+
+        # Track progress
+        completed = 0
+        failed_files: list[tuple[Path, str]] = []
+
+        def progress_callback(path: Path, status: str) -> None:
+            nonlocal completed
+            if status == "completed":
+                completed += 1
+            elif status == "failed":
+                completed += 1
+
+        # Process with progress bar
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                f"[green]Processing {len(files)} files...",
+                total=len(files),
+            )
+
+            # Custom callback to update progress
+            def update_progress(path: Path, status: str) -> None:
+                progress_callback(path, status)
+                if status in ("completed", "failed"):
+                    progress.update(task, advance=1)
+
+            # Run batch processing
+            summary = process_directory(
+                directory=directory,
+                output_dir=output_dir,
+                output_format=format,  # type: ignore
+                concurrency=concurrency,
+                progress_callback=update_progress,
+            )
+
+        # Show summary
+        console.print()
+        console.print("[bold]Batch Processing Complete[/bold]")
+        console.print(f"  [green]Successful:[/green] {summary.successful}")
+        console.print(f"  [red]Failed:[/red] {summary.failed}")
+        console.print(f"  [dim]Total:[/dim] {summary.total_files}")
+
+        if summary.failed > 0:
+            console.print()
+            console.print("[bold red]Failed files:[/bold red]")
+            for result in summary.results:
+                if not result.success:
+                    console.print(f"  [red]✗[/red] {result.input_path.name}")
+                    if verbose and result.error:
+                        console.print(f"    [dim]{result.error}[/dim]")
+
+        if summary.failed > 0:
+            raise typer.Exit(1)
+
+    except APIKeyMissingError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command()
