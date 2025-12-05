@@ -107,6 +107,12 @@ def extract(
         "-o",
         help="Output audio file path.",
     ),
+    format: str = typer.Option(
+        "mp3",
+        "--format",
+        "-f",
+        help="Output audio format: mp3, wav",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -118,10 +124,65 @@ def extract(
     Examples:
         transcribe extract video.mkv
         transcribe extract video.mp4 --output audio.mp3
+        transcribe extract video.avi --format wav
     """
-    console.print(f"[bold blue]Extracting audio from:[/bold blue] {file}")
-    # TODO: Implement extraction logic in Sprint 2
-    console.print("[yellow]Extraction not yet implemented.[/yellow]")
+    from transcribe_cli.core import (
+        ExtractionError,
+        FFmpegNotFoundError,
+        FFmpegVersionError,
+        NoAudioStreamError,
+        UnsupportedFormatError,
+        extract_audio,
+        get_media_info,
+    )
+
+    # Validate format
+    if format not in ("mp3", "wav"):
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use 'mp3' or 'wav'.")
+        raise typer.Exit(1)
+
+    try:
+        # Show file info if verbose
+        if verbose:
+            console.print(f"[dim]Analyzing: {file}[/dim]")
+            info = get_media_info(file)
+            console.print(f"[dim]  Format: {info.format_name}[/dim]")
+            console.print(f"[dim]  Duration: {info.duration_display}[/dim]")
+            console.print(f"[dim]  Audio codec: {info.audio_codec}[/dim]")
+
+        console.print(f"[bold blue]Extracting audio from:[/bold blue] {file}")
+
+        # Perform extraction
+        result = extract_audio(
+            input_path=file,
+            output_path=output,
+            output_format=format,  # type: ignore
+        )
+
+        console.print(f"[green]Success![/green] Audio extracted to: {result.output_path}")
+        if verbose:
+            console.print(f"[dim]  Size: {result.file_size_display}[/dim]")
+            if result.duration:
+                console.print(f"[dim]  Duration: {result.duration:.1f}s[/dim]")
+
+    except FFmpegNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except FFmpegVersionError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except UnsupportedFormatError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except NoAudioStreamError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except ExtractionError as e:
+        console.print(f"[red]Extraction failed:[/red] {e}")
+        raise typer.Exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command()
