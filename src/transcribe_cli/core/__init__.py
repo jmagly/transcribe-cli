@@ -22,6 +22,15 @@ from .ffmpeg import (
     check_ffmpeg_available,
     validate_ffmpeg,
 )
+from .transcriber import (
+    APIKeyMissingError,
+    FileTooLargeError,
+    TranscriptionError,
+    TranscriptionResult,
+    TranscriptionSegment,
+    save_transcript,
+    transcribe_file,
+)
 
 __all__ = [
     # FFmpeg
@@ -41,6 +50,14 @@ __all__ = [
     "is_audio_file",
     "is_video_file",
     "is_supported_file",
+    # Transcriber
+    "APIKeyMissingError",
+    "FileTooLargeError",
+    "TranscriptionError",
+    "TranscriptionResult",
+    "TranscriptionSegment",
+    "transcribe_file",
+    "save_transcript",
     # Constants
     "VIDEO_EXTENSIONS",
     "AUDIO_EXTENSIONS",

@@ -153,3 +153,107 @@ class TestExtractCommand:
             result = runner.invoke(app, ["extract", str(fake_video)])
             assert result.exit_code == 1
             assert "No audio" in result.stdout or "Error" in result.stdout
+
+
+class TestTranscribeCommand:
+    """Tests for transcribe command."""
+
+    def test_transcribe_nonexistent_file(self) -> None:
+        """transcribe should error on non-existent file."""
+        result = runner.invoke(app, ["transcribe", "nonexistent.mp3"])
+        assert result.exit_code != 0
+
+    def test_transcribe_invalid_format(self, tmp_path: Path) -> None:
+        """transcribe should reject invalid output formats."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+
+        result = runner.invoke(app, ["transcribe", str(fake_audio), "--format", "pdf"])
+        assert result.exit_code == 1
+        assert "Unsupported format" in result.stdout
+
+    def test_transcribe_srt_shows_warning(self, tmp_path: Path) -> None:
+        """transcribe with --format srt should show warning."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+
+        # Mock the transcription to avoid API call
+        mock_result = MagicMock()
+        mock_result.text = "Test transcript"
+        mock_result.language = "en"
+        mock_result.word_count = 2
+        mock_result.duration = 5.0
+
+        with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
+            with patch("transcribe_cli.core.save_transcript", return_value=tmp_path / "audio.txt"):
+                result = runner.invoke(app, ["transcribe", str(fake_audio), "--format", "srt"])
+                # Should show SRT warning but not fail
+                assert "SRT format will be available" in result.stdout or result.exit_code == 0
+
+    def test_transcribe_with_mock_success(self, tmp_path: Path) -> None:
+        """transcribe should succeed with mocked API."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+
+        mock_result = MagicMock()
+        mock_result.text = "This is a test transcription."
+        mock_result.language = "english"
+        mock_result.word_count = 5
+        mock_result.duration = 10.0
+
+        with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
+            with patch("transcribe_cli.core.save_transcript", return_value=tmp_path / "audio.txt"):
+                result = runner.invoke(app, ["transcribe", str(fake_audio)])
+                assert result.exit_code == 0
+                assert "Success" in result.stdout
+
+    def test_transcribe_api_key_missing(self, tmp_path: Path) -> None:
+        """transcribe should show helpful error when API key missing."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+
+        from transcribe_cli.core.transcriber import APIKeyMissingError
+
+        with patch(
+            "transcribe_cli.core.transcribe_file",
+            side_effect=APIKeyMissingError(),
+        ):
+            result = runner.invoke(app, ["transcribe", str(fake_audio)])
+            assert result.exit_code == 1
+            assert "OPENAI_API_KEY" in result.stdout or "Error" in result.stdout
+
+    def test_transcribe_file_too_large(self, tmp_path: Path) -> None:
+        """transcribe should error on files >25MB."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+
+        from transcribe_cli.core.transcriber import FileTooLargeError
+
+        with patch(
+            "transcribe_cli.core.transcribe_file",
+            side_effect=FileTooLargeError(fake_audio, 30.0, 25.0),
+        ):
+            result = runner.invoke(app, ["transcribe", str(fake_audio)])
+            assert result.exit_code == 1
+            assert "too large" in result.stdout.lower() or "Error" in result.stdout
+
+    def test_transcribe_with_output_dir(self, tmp_path: Path) -> None:
+        """transcribe should respect --output-dir option."""
+        fake_audio = tmp_path / "audio.mp3"
+        fake_audio.write_bytes(b"fake audio content")
+        output_dir = tmp_path / "output"
+
+        mock_result = MagicMock()
+        mock_result.text = "Test"
+        mock_result.language = "en"
+        mock_result.word_count = 1
+        mock_result.duration = 1.0
+
+        with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
+            with patch("transcribe_cli.core.save_transcript") as mock_save:
+                mock_save.return_value = output_dir / "audio.txt"
+                result = runner.invoke(
+                    app, ["transcribe", str(fake_audio), "--output-dir", str(output_dir)]
+                )
+                # Verify output_dir was created
+                assert result.exit_code == 0

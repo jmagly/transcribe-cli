@@ -88,9 +88,89 @@ def transcribe(
         transcribe video.mkv --format srt
         transcribe recording.wav --output-dir ./transcripts
     """
-    console.print(f"[bold blue]Transcribing:[/bold blue] {file}")
-    # TODO: Implement transcription logic in Sprint 3
-    console.print("[yellow]Transcription not yet implemented.[/yellow]")
+    from transcribe_cli.core import (
+        APIKeyMissingError,
+        FFmpegNotFoundError,
+        FileTooLargeError,
+        TranscriptionError,
+        UnsupportedFormatError,
+        get_media_info,
+        is_video_file,
+        save_transcript,
+        transcribe_file,
+    )
+
+    # Validate output format
+    if format not in ("txt", "srt"):
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use 'txt' or 'srt'.")
+        raise typer.Exit(1)
+
+    # SRT format not yet implemented
+    if format == "srt":
+        console.print("[yellow]SRT format will be available in a future release.[/yellow]")
+        console.print("[yellow]Using TXT format for now.[/yellow]")
+        format = "txt"
+
+    try:
+        # Show file info if verbose
+        if verbose:
+            console.print(f"[dim]Analyzing: {file}[/dim]")
+            try:
+                info = get_media_info(file)
+                console.print(f"[dim]  Format: {info.format_name}[/dim]")
+                console.print(f"[dim]  Duration: {info.duration_display}[/dim]")
+                if info.has_audio:
+                    console.print(f"[dim]  Audio codec: {info.audio_codec}[/dim]")
+                if is_video_file(file):
+                    console.print(f"[dim]  Type: Video (audio will be extracted)[/dim]")
+            except Exception:
+                pass  # Don't fail on info gathering
+
+        console.print(f"[bold blue]Transcribing:[/bold blue] {file}")
+
+        # Determine output path
+        output_path = None
+        if output_dir:
+            output_dir = Path(output_dir).resolve()
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{file.stem}.{format}"
+
+        # Perform transcription
+        with console.status("[bold green]Transcribing...[/bold green]"):
+            result = transcribe_file(
+                input_path=file,
+                output_path=output_path,
+                language=language,
+            )
+
+        # Save transcript
+        saved_path = save_transcript(result, output_path)
+
+        console.print(f"[green]Success![/green] Transcript saved to: {saved_path}")
+        if verbose:
+            console.print(f"[dim]  Language: {result.language}[/dim]")
+            console.print(f"[dim]  Words: {result.word_count}[/dim]")
+            if result.duration:
+                console.print(f"[dim]  Duration: {result.duration:.1f}s[/dim]")
+
+    except APIKeyMissingError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except FileTooLargeError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except FFmpegNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except UnsupportedFormatError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    except TranscriptionError as e:
+        console.print(f"[red]Transcription failed:[/red] {e}")
+        raise typer.Exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
 
 
 @app.command()
