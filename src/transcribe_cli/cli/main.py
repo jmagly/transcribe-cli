@@ -4,10 +4,12 @@ Implements ADR-004: CLI Framework Selection (Typer)
 - Type-hint based argument parsing
 - Rich integration for progress display
 - Subcommands for different operations
+
+Supports both local GPU inference (faster-whisper) and OpenAI API backends.
 """
 
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import typer
 from rich.console import Console
@@ -16,7 +18,7 @@ from transcribe_cli import __version__
 
 app = typer.Typer(
     name="transcribe",
-    help="Transcribe audio and video files using OpenAI Whisper API.",
+    help="Transcribe audio and video files using local GPU or OpenAI API.",
     add_completion=False,
     rich_markup_mode="rich",
 )
@@ -43,8 +45,8 @@ def main(
 ) -> None:
     """Audio Transcription CLI Tool.
 
-    Transcribe audio and video files using OpenAI Whisper API.
-    Supports batch processing, multiple output formats, and large files.
+    Transcribe audio and video files using local GPU (faster-whisper) or OpenAI API.
+    Supports batch processing, multiple output formats, speaker diarization, and large files.
     """
     pass
 
@@ -67,13 +69,54 @@ def transcribe(
         "txt",
         "--format",
         "-f",
-        help="Output format: txt, srt",
+        help="Output format: txt, srt, diarized",
     ),
     language: str = typer.Option(
         "auto",
         "--language",
         "-l",
         help="Language code (e.g., 'en', 'es') or 'auto' for detection.",
+    ),
+    # Backend selection
+    backend: str = typer.Option(
+        "local",
+        "--backend",
+        "-b",
+        help="Transcription backend: local (GPU/CPU) or api (OpenAI).",
+    ),
+    # Local inference options
+    model: str = typer.Option(
+        "medium",
+        "--model",
+        "-m",
+        help="Whisper model size: tiny, base, small, medium, large-v3",
+    ),
+    device: str = typer.Option(
+        "auto",
+        "--device",
+        help="Device for local inference: cuda, cpu, auto",
+    ),
+    compute_type: str = typer.Option(
+        "auto",
+        "--compute-type",
+        help="Compute type: int8, float16, float32, auto (int8 faster on older GPUs)",
+    ),
+    # Diarization options
+    diarize: bool = typer.Option(
+        False,
+        "--diarize",
+        "-d",
+        help="Enable speaker diarization (requires HF_TOKEN).",
+    ),
+    min_speakers: Optional[int] = typer.Option(
+        None,
+        "--min-speakers",
+        help="Minimum number of speakers (optional hint for diarization).",
+    ),
+    max_speakers: Optional[int] = typer.Option(
+        None,
+        "--max-speakers",
+        help="Maximum number of speakers (optional hint for diarization).",
     ),
     verbose: bool = typer.Option(
         False,
@@ -86,7 +129,9 @@ def transcribe(
     Examples:
         transcribe audio.mp3
         transcribe video.mkv --format srt
-        transcribe recording.wav --output-dir ./transcripts
+        transcribe recording.wav --model large-v3
+        transcribe meeting.mp4 --diarize --format diarized
+        transcribe audio.mp3 --backend api  # Use OpenAI API
     """
     from transcribe_cli.core import (
         APIKeyMissingError,
@@ -98,14 +143,35 @@ def transcribe(
         is_video_file,
         save_transcript,
         transcribe_file,
+        # Local transcriber
+        LocalTranscriberConfig,
+        LocalTranscriptionError,
+        transcribe_file_local,
+        get_gpu_info,
+        # Diarization
+        DiarizationConfig,
+        DiarizationError,
+        DiarizationNotAvailable,
+        transcribe_and_diarize,
     )
 
-    from transcribe_cli.output import save_formatted_transcript
+    from transcribe_cli.output import format_transcript, save_formatted_transcript
+
+    # Validate backend
+    if backend not in ("local", "api"):
+        console.print(f"[red]Error:[/red] Unsupported backend '{backend}'. Use 'local' or 'api'.")
+        raise typer.Exit(1)
 
     # Validate output format
-    if format not in ("txt", "srt"):
-        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use 'txt' or 'srt'.")
+    valid_formats = ("txt", "srt", "diarized")
+    if format not in valid_formats:
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use: {', '.join(valid_formats)}")
         raise typer.Exit(1)
+
+    # Diarized format requires diarization
+    if format == "diarized" and not diarize:
+        console.print("[yellow]Note:[/yellow] Enabling diarization for diarized output format.")
+        diarize = True
 
     try:
         # Show file info if verbose
@@ -122,37 +188,113 @@ def transcribe(
             except Exception:
                 pass  # Don't fail on info gathering
 
-        console.print(f"[bold blue]Transcribing:[/bold blue] {file}")
+            # Show GPU info for local backend
+            if backend == "local":
+                try:
+                    gpu_info = get_gpu_info()
+                    if gpu_info.get("cuda_available"):
+                        console.print(f"[dim]  GPU: {gpu_info.get('device_name', 'Unknown')}[/dim]")
+                        console.print(f"[dim]  VRAM: {gpu_info.get('vram_total_gb', 0):.1f} GB[/dim]")
+                    else:
+                        console.print("[dim]  GPU: Not available (using CPU)[/dim]")
+                except Exception:
+                    pass
+
+        backend_display = "local GPU" if backend == "local" else "OpenAI API"
+        console.print(f"[bold blue]Transcribing ({backend_display}):[/bold blue] {file}")
 
         # Determine output path
+        output_ext = format if format != "diarized" else "txt"
         output_path = None
         if output_dir:
             output_dir = Path(output_dir).resolve()
             output_dir.mkdir(parents=True, exist_ok=True)
-            output_path = output_dir / f"{file.stem}.{format}"
+            output_path = output_dir / f"{file.stem}.{output_ext}"
         else:
-            output_path = file.with_suffix(f".{format}")
+            output_path = file.with_suffix(f".{output_ext}")
 
-        # Perform transcription
-        with console.status("[bold green]Transcribing...[/bold green]"):
-            result = transcribe_file(
-                input_path=file,
-                output_path=output_path,
-                language=language,
-            )
+        # Perform transcription based on backend
+        if backend == "local":
+            if diarize:
+                # Use combined transcription + diarization
+                with console.status(f"[bold green]Transcribing with {model} model + diarization...[/bold green]"):
+                    transcriber_config = LocalTranscriberConfig(
+                        model_size=model,  # type: ignore
+                        device=device,  # type: ignore
+                        compute_type=compute_type,  # type: ignore
+                    )
+                    diarization_config = DiarizationConfig(
+                        device=device,
+                        min_speakers=min_speakers,
+                        max_speakers=max_speakers,
+                    )
+                    result = transcribe_and_diarize(
+                        input_path=file,
+                        output_path=output_path,
+                        language=language,
+                        transcriber_config=transcriber_config,
+                        diarization_config=diarization_config,
+                    )
+            else:
+                # Local transcription only
+                with console.status(f"[bold green]Transcribing with {model} model...[/bold green]"):
+                    config = LocalTranscriberConfig(
+                        model_size=model,  # type: ignore
+                        device=device,  # type: ignore
+                        compute_type=compute_type,  # type: ignore
+                    )
+                    result = transcribe_file_local(
+                        input_path=file,
+                        output_path=output_path,
+                        language=language,
+                        config=config,
+                    )
+        else:
+            # API backend (original behavior)
+            if diarize:
+                console.print("[yellow]Warning:[/yellow] Diarization not supported with API backend. Using local diarization.")
+                # Transcribe via API, then diarize locally
+                with console.status("[bold green]Transcribing via API...[/bold green]"):
+                    result = transcribe_file(
+                        input_path=file,
+                        output_path=output_path,
+                        language=language,
+                    )
+            else:
+                with console.status("[bold green]Transcribing via API...[/bold green]"):
+                    result = transcribe_file(
+                        input_path=file,
+                        output_path=output_path,
+                        language=language,
+                    )
 
-        # Save transcript with formatter (supports SRT)
-        saved_path = save_formatted_transcript(result, output_path, format)  # type: ignore
+        # Save transcript with appropriate format
+        formatted_content = format_transcript(result, format)  # type: ignore
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(formatted_content, encoding="utf-8")
 
-        console.print(f"[green]Success![/green] Transcript saved to: {saved_path}")
+        console.print(f"[green]Success![/green] Transcript saved to: {output_path}")
         if verbose:
             console.print(f"[dim]  Language: {result.language}[/dim]")
-            console.print(f"[dim]  Words: {result.word_count}[/dim]")
+            if hasattr(result, 'word_count'):
+                console.print(f"[dim]  Words: {result.word_count}[/dim]")
             if result.duration:
                 console.print(f"[dim]  Duration: {result.duration:.1f}s[/dim]")
+            if diarize and hasattr(result, 'speakers'):
+                console.print(f"[dim]  Speakers: {', '.join(result.speakers)}[/dim]")
 
     except APIKeyMissingError as e:
         console.print(f"[red]Error:[/red] {e}")
+        console.print("[dim]Set OPENAI_API_KEY or use --backend local[/dim]")
+        raise typer.Exit(1)
+    except LocalTranscriptionError as e:
+        console.print(f"[red]Local transcription failed:[/red] {e}")
+        raise typer.Exit(1)
+    except DiarizationNotAvailable as e:
+        console.print(f"[red]Diarization not available:[/red] {e}")
+        raise typer.Exit(1)
+    except DiarizationError as e:
+        console.print(f"[red]Diarization failed:[/red] {e}")
         raise typer.Exit(1)
     except FileTooLargeError as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -509,27 +651,62 @@ def config(
             console.print("  [bold]Config file:[/bold] [dim]none (using defaults)[/dim]")
         console.print()
 
+        # Show local backend status
+        console.print("  [bold]Local Backend (faster-whisper):[/bold]")
+        try:
+            from transcribe_cli.core import get_gpu_info, get_available_models
+            gpu_info = get_gpu_info()
+            if gpu_info.get("cuda_available"):
+                console.print(f"    [green]✓[/green] GPU: {gpu_info.get('device_name', 'Unknown')}")
+                console.print(f"    [green]✓[/green] VRAM: {gpu_info.get('vram_total_gb', 0):.1f} GB")
+            else:
+                console.print("    [yellow]⚠[/yellow] GPU: Not available (CPU fallback)")
+            models = get_available_models()
+            console.print(f"    [dim]Available models: {', '.join(models)}[/dim]")
+        except ImportError:
+            console.print("    [red]✗[/red] faster-whisper not installed")
+            console.print("    [dim]Install: pip install transcribe-cli[local][/dim]")
+        console.print()
+
+        # Show diarization status
+        console.print("  [bold]Diarization (pyannote):[/bold]")
+        try:
+            import pyannote.audio
+            hf_token = os.environ.get("HF_TOKEN")
+            if hf_token:
+                masked = hf_token[:8] + "..." if len(hf_token) > 8 else "***"
+                console.print(f"    [green]✓[/green] HF_TOKEN: {masked}")
+            else:
+                console.print("    [yellow]⚠[/yellow] HF_TOKEN: [dim]not set[/dim]")
+                console.print("    [dim]Required for speaker diarization[/dim]")
+        except ImportError:
+            console.print("    [dim]Not installed (optional)[/dim]")
+            console.print("    [dim]Install: pip install transcribe-cli[diarization][/dim]")
+        console.print()
+
         # Show API key status
+        console.print("  [bold]API Backend (OpenAI):[/bold]")
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key:
             masked = api_key[:8] + "..." + api_key[-4:] if len(api_key) > 12 else "***"
-            console.print(f"  [bold]OPENAI_API_KEY:[/bold] {masked}")
+            console.print(f"    [green]✓[/green] OPENAI_API_KEY: {masked}")
         else:
-            console.print("  [bold]OPENAI_API_KEY:[/bold] [red]not set[/red]")
+            console.print("    [dim]OPENAI_API_KEY: not set (local backend is default)[/dim]")
         console.print()
 
         # Show defaults
         console.print("  [bold]Defaults:[/bold]")
+        console.print("    Backend: local")
+        console.print("    Model: medium")
         console.print("    Output format: txt")
-        console.print("    Concurrency: 5")
         console.print("    Language: auto")
-        console.print("    Recursive: false")
     else:
         console.print("Use [bold]--show[/bold] to display current configuration.")
         console.print("Use [bold]--init[/bold] to create a config file.")
         console.print("Use [bold]--locations[/bold] to see config file search paths.")
         console.print()
-        console.print("[dim]Set OPENAI_API_KEY environment variable for API access.[/dim]")
+        console.print("[dim]Local GPU inference is the default backend.[/dim]")
+        console.print("[dim]Set HF_TOKEN for speaker diarization.[/dim]")
 
 
 @app.command()
@@ -587,13 +764,48 @@ def setup(
         else:
             console.print(f"  [red]✗[/red] Python {py_version} (requires 3.9+)")
 
-        # Check API key
+        # Check local transcription backend
+        console.print()
+        console.print("[bold]Local Transcription:[/bold]")
+        try:
+            from transcribe_cli.core import get_gpu_info
+            gpu_info = get_gpu_info()
+            if gpu_info.get("cuda_available"):
+                console.print(f"  [green]✓[/green] GPU: {gpu_info.get('device_name', 'Unknown')}")
+                console.print(f"  [green]✓[/green] CUDA: Available")
+                console.print(f"  [dim]    VRAM: {gpu_info.get('vram_total_gb', 0):.1f} GB[/dim]")
+            else:
+                console.print("  [yellow]⚠[/yellow] GPU: Not available")
+                console.print("  [dim]    Will use CPU (slower)[/dim]")
+        except ImportError:
+            console.print("  [red]✗[/red] faster-whisper not installed")
+            console.print("  [dim]    Install: pip install transcribe-cli[local][/dim]")
+
+        # Check diarization
+        console.print()
+        console.print("[bold]Diarization (optional):[/bold]")
+        try:
+            import pyannote.audio
+            console.print("  [green]✓[/green] pyannote-audio installed")
+            import os
+            if os.environ.get("HF_TOKEN"):
+                console.print("  [green]✓[/green] HF_TOKEN is set")
+            else:
+                console.print("  [yellow]⚠[/yellow] HF_TOKEN not set")
+                console.print("  [dim]    Required for speaker diarization[/dim]")
+                console.print("  [dim]    Get token: https://huggingface.co/settings/tokens[/dim]")
+        except ImportError:
+            console.print("  [dim]Not installed (optional feature)[/dim]")
+            console.print("  [dim]    Install: pip install transcribe-cli[diarization][/dim]")
+
+        # Check API key (optional now)
+        console.print()
+        console.print("[bold]API Backend (optional):[/bold]")
         import os
         if os.environ.get("OPENAI_API_KEY"):
             console.print("  [green]✓[/green] OPENAI_API_KEY is set")
         else:
-            console.print("  [yellow]⚠[/yellow] OPENAI_API_KEY not set")
-            console.print("    [dim]Set: export OPENAI_API_KEY=sk-...[/dim]")
+            console.print("  [dim]OPENAI_API_KEY not set (use --backend api if needed)[/dim]")
 
         console.print()
 

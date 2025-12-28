@@ -4,6 +4,8 @@ Implements ADR-005: Configuration Management Strategy
 - Hierarchical config: CLI args -> env vars -> config file -> defaults
 - API key via environment variable only (security)
 - pydantic SecretStr for sensitive data
+- Local inference configuration for faster-whisper
+- Diarization configuration for pyannote
 """
 
 import tomllib
@@ -72,16 +74,35 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # API Configuration (required, no default)
+    # Backend selection: "local" for GPU inference, "api" for OpenAI API
+    backend: Literal["local", "api"] = "local"
+
+    # API Configuration (only needed if backend="api")
     # Uses OPENAI_API_KEY (no prefix) for compatibility with OpenAI conventions
     openai_api_key: SecretStr = Field(
         default=None,  # type: ignore[assignment]
         validation_alias="OPENAI_API_KEY",
     )
 
+    # Local inference settings (only used if backend="local")
+    model_size: Literal["tiny", "base", "small", "medium", "large-v3"] = "medium"
+    device: Literal["cuda", "cpu", "auto"] = "auto"
+    compute_type: Literal["int8", "float16", "float32", "auto"] = "auto"
+    beam_size: int = 5
+    vad_filter: bool = True
+
+    # Diarization settings
+    diarization: bool = False
+    hf_token: SecretStr = Field(
+        default=None,  # type: ignore[assignment]
+        validation_alias="HF_TOKEN",
+    )
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+
     # Output settings
     output_dir: Path = Path(".")
-    output_format: Literal["txt", "srt"] = "txt"
+    output_format: Literal["txt", "srt", "diarized"] = "txt"
 
     # Processing settings
     concurrency: int = 5
@@ -155,15 +176,44 @@ def create_default_config(path: Optional[Path] = None) -> Path:
     content = '''# Transcribe CLI Configuration
 # See: transcribe config --show
 
+[backend]
+# Backend: "local" for GPU inference, "api" for OpenAI API
+backend = "local"
+
+[local]
+# Model size: tiny, base, small, medium, large-v3
+model_size = "medium"
+
+# Device: cuda, cpu, auto
+device = "auto"
+
+# Compute type: int8, float16, float32, auto
+# int8 recommended for older GPUs (Pascal/GTX 10xx)
+compute_type = "auto"
+
+# Beam size for decoding (higher = more accurate, slower)
+beam_size = 5
+
+# Voice activity detection filter
+vad_filter = true
+
+[diarization]
+# Enable speaker diarization (requires HF_TOKEN)
+enabled = false
+
+# Speaker count hints (optional)
+# min_speakers = 2
+# max_speakers = 5
+
 [output]
-# Output format: "txt" or "srt"
+# Output format: "txt", "srt", or "diarized"
 format = "txt"
 
 # Default output directory (empty = same as input)
 # dir = "./transcripts"
 
 [processing]
-# Maximum concurrent API calls (1-20)
+# Maximum concurrent jobs (1-20)
 concurrency = 5
 
 # Language code or "auto" for detection

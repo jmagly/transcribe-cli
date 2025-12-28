@@ -4,15 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "transcribe-cli"
-version = "0.1.0"
-description = "CLI tool for transcribing audio and video files using OpenAI Whisper API"
+version = "0.2.0"
+description = "CLI tool for transcribing audio and video files with local GPU or cloud inference"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [
     { name = "Audio Transcription Team" }
 ]
-keywords = ["transcription", "whisper", "audio", "video", "cli", "openai"]
+keywords = ["transcription", "whisper", "audio", "video", "cli", "openai", "faster-whisper", "diarization", "gpu"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -30,7 +30,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "openai>=1.0.0",
     "ffmpeg-python>=0.2.0",
     "typer>=0.9.0",
     "rich>=13.0.0",
@@ -39,9 +38,32 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "srt>=3.5.0",
     "tenacity>=8.0.0",
+    "faster-whisper>=1.0.0",
 ]
 
 [project.optional-dependencies]
+# Local GPU inference (default, recommended)
+local = [
+    "faster-whisper>=1.0.0",
+]
+
+# Speaker diarization (requires HuggingFace token)
+diarization = [
+    "pyannote.audio>=3.0.0",
+]
+
+# OpenAI API backend (alternative to local)
+api = [
+    "openai>=1.0.0",
+]
+
+# Full installation with all features
+full = [
+    "faster-whisper>=1.0.0",
+    "pyannote.audio>=3.0.0",
+    "openai>=1.0.0",
+]
+
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",

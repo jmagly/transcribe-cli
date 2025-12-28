@@ -38,6 +38,26 @@ from .transcriber import (
     save_transcript,
     transcribe_file,
 )
+from .local_transcriber import (
+    LocalTranscriberConfig,
+    LocalTranscriptionError,
+    ModelNotFoundError,
+    get_available_models,
+    get_gpu_info,
+    transcribe_file_local,
+)
+from .diarizer import (
+    DiarizationConfig,
+    DiarizationError,
+    DiarizationNotAvailable,
+    DiarizationResult,
+    DiarizedSegment,
+    DiarizedTranscript,
+    SpeakerSegment,
+    diarize_audio,
+    merge_transcription_with_diarization,
+    transcribe_and_diarize,
+)
 
 __all__ = [
     # FFmpeg
@@ -57,7 +77,7 @@ __all__ = [
     "is_audio_file",
     "is_video_file",
     "is_supported_file",
-    # Transcriber
+    # Transcriber (API)
     "APIKeyMissingError",
     "FileTooLargeError",
     "TranscriptionError",
@@ -65,6 +85,24 @@ __all__ = [
     "TranscriptionSegment",
     "transcribe_file",
     "save_transcript",
+    # Local Transcriber
+    "LocalTranscriberConfig",
+    "LocalTranscriptionError",
+    "ModelNotFoundError",
+    "get_available_models",
+    "get_gpu_info",
+    "transcribe_file_local",
+    # Diarization
+    "DiarizationConfig",
+    "DiarizationError",
+    "DiarizationNotAvailable",
+    "DiarizationResult",
+    "DiarizedSegment",
+    "DiarizedTranscript",
+    "SpeakerSegment",
+    "diarize_audio",
+    "merge_transcription_with_diarization",
+    "transcribe_and_diarize",
     # Batch
     "BatchResult",
     "BatchSummary",

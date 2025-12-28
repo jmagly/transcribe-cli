@@ -3,10 +3,11 @@
 Implements Sprint 4: Output Formats
 - TXT plain text format
 - SRT subtitle format with timestamps
+- Diarized format with speaker labels
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Union
 
 import srt
 from datetime import timedelta
@@ -79,15 +80,74 @@ def format_as_srt(result: TranscriptionResult) -> str:
     return srt.compose(subtitles)
 
 
+def format_as_diarized(result) -> str:
+    """Format diarized transcription with speaker labels.
+
+    Args:
+        result: DiarizedTranscript with speaker-labeled segments.
+
+    Returns:
+        Formatted transcript with speaker labels and timestamps.
+
+    Raises:
+        ValueError: If result doesn't have diarized segments.
+    """
+    # Handle both DiarizedTranscript and TranscriptionResult
+    if hasattr(result, 'segments') and result.segments:
+        # Check if segments have speaker attribute
+        if hasattr(result.segments[0], 'speaker'):
+            lines = []
+            current_speaker = None
+
+            for seg in result.segments:
+                timestamp = f"[{_format_timestamp(seg.start)} - {_format_timestamp(seg.end)}]"
+
+                if seg.speaker != current_speaker:
+                    current_speaker = seg.speaker
+                    lines.append(f"\n{seg.speaker}")
+                    lines.append(f"{timestamp} {seg.text}")
+                else:
+                    lines.append(f"{timestamp} {seg.text}")
+
+            # Add speaker summary at end
+            if hasattr(result, 'speakers'):
+                lines.append(f"\n\n---\nSpeakers: {', '.join(result.speakers)}")
+
+            return "\n".join(lines).strip()
+
+    # Fallback: format as plain text if no diarization
+    if hasattr(result, 'text'):
+        return result.text.strip()
+    elif hasattr(result, 'full_text'):
+        return result.full_text.strip()
+
+    raise ValueError("Cannot format as diarized: no segments with speaker labels")
+
+
+def _format_timestamp(seconds: float) -> str:
+    """Format seconds as HH:MM:SS.
+
+    Args:
+        seconds: Time in seconds.
+
+    Returns:
+        Formatted timestamp string.
+    """
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def format_transcript(
-    result: TranscriptionResult,
-    output_format: Literal["txt", "srt"] = "txt",
+    result: Union[TranscriptionResult, "DiarizedTranscript"],
+    output_format: Literal["txt", "srt", "diarized"] = "txt",
 ) -> str:
     """Format transcription result in specified format.
 
     Args:
-        result: TranscriptionResult to format.
-        output_format: Output format ("txt" or "srt").
+        result: TranscriptionResult or DiarizedTranscript to format.
+        output_format: Output format ("txt", "srt", or "diarized").
 
     Returns:
         Formatted transcript string.
@@ -99,6 +159,8 @@ def format_transcript(
         return format_as_txt(result)
     elif output_format == "srt":
         return format_as_srt(result)
+    elif output_format == "diarized":
+        return format_as_diarized(result)
     else:
         raise ValueError(f"Unsupported output format: {output_format}")
 
