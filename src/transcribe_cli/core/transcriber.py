@@ -4,14 +4,31 @@ Implements Sprint 3: Transcription Client
 - OpenAI Whisper API integration
 - Retry logic with exponential backoff
 - Response parsing with timestamps
+
+Note: This module requires the 'openai' package.
+Install with: pip install transcribe-cli[api]
 """
 
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, TYPE_CHECKING
 
-from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
+# OpenAI is optional - only needed for API backend
+try:
+    from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    # Create placeholder exceptions for type hints
+    class APIConnectionError(Exception):  # type: ignore
+        pass
+    class APIStatusError(Exception):  # type: ignore
+        pass
+    class RateLimitError(Exception):  # type: ignore
+        pass
+    OpenAI = None  # type: ignore
+
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -234,6 +251,13 @@ def transcribe_file(
         FFmpegNotFoundError: If FFmpeg needed but not installed.
         TranscriptionError: If transcription fails.
     """
+    if not OPENAI_AVAILABLE:
+        raise TranscriptionError(
+            "OpenAI API backend requires the 'openai' package.\n"
+            "Install with: pip install transcribe-cli[api]\n\n"
+            "Or use local backend: transcribe <file> --backend local"
+        )
+
     input_path = Path(input_path).resolve()
 
     if not input_path.exists():
