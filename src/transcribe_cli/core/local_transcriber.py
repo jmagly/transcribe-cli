@@ -37,12 +37,16 @@ class LocalTranscriberConfig:
     vad_threshold: float = 0.5
 
     def get_device(self) -> str:
-        """Resolve 'auto' device to actual device."""
+        """Resolve 'auto' device to actual device.
+
+        Uses ctranslate2 for GPU detection as it's what faster-whisper uses.
+        PyTorch may give false negatives for older GPUs (Pascal/GTX 10xx).
+        """
         if self.device != "auto":
             return self.device
         try:
-            import torch
-            return "cuda" if torch.cuda.is_available() else "cpu"
+            import ctranslate2
+            return "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
         except ImportError:
             return "cpu"
 
@@ -208,20 +212,46 @@ def get_available_models() -> list[str]:
 def get_gpu_info() -> dict:
     """Get GPU information for diagnostics.
 
+    Uses ctranslate2 (faster-whisper's backend) for accurate GPU detection,
+    as PyTorch may report false negatives for older GPUs.
+
     Returns:
         Dictionary with GPU info or error message.
     """
+    result = {"cuda_available": False}
+
+    # Check ctranslate2 CUDA support (what faster-whisper actually uses)
     try:
-        import torch
-        if torch.cuda.is_available():
-            return {
-                "available": True,
-                "device_count": torch.cuda.device_count(),
-                "device_name": torch.cuda.get_device_name(0),
-                "memory_total": torch.cuda.get_device_properties(0).total_memory // (1024**2),
-            }
-        return {"available": False, "reason": "CUDA not available"}
+        import ctranslate2
+        cuda_device_count = ctranslate2.get_cuda_device_count()
+        if cuda_device_count > 0:
+            result["cuda_available"] = True
+            result["device_count"] = cuda_device_count
+            result["compute_types"] = list(ctranslate2.get_supported_compute_types("cuda"))
     except ImportError:
-        return {"available": False, "reason": "PyTorch not installed"}
+        result["reason"] = "ctranslate2 not installed"
+        return result
     except Exception as e:
-        return {"available": False, "reason": str(e)}
+        result["reason"] = f"ctranslate2 error: {e}"
+
+    # Try to get device name from nvidia-smi or torch
+    if result.get("cuda_available"):
+        try:
+            import subprocess
+            output = subprocess.check_output(
+                ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                text=True, timeout=5
+            ).strip().split(",")
+            result["device_name"] = output[0].strip()
+            result["vram_total_gb"] = int(output[1].strip()) / 1024
+        except Exception:
+            # Fallback to torch if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    result["device_name"] = torch.cuda.get_device_name(0)
+                    result["vram_total_gb"] = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            except Exception:
+                result["device_name"] = "Unknown NVIDIA GPU"
+
+    return result
