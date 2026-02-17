@@ -185,7 +185,8 @@ class TestTranscribeCommand:
         mock_result.duration = 5.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.core.save_transcript", return_value=tmp_path / "audio.txt"):
+            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
+                mock_save.return_value = tmp_path / "audio.srt"
                 result = runner.invoke(app, ["transcribe", str(fake_audio), "--format", "srt"])
                 # Should show SRT warning but not fail
                 assert "SRT format will be available" in result.stdout or result.exit_code == 0
@@ -202,7 +203,8 @@ class TestTranscribeCommand:
         mock_result.duration = 10.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.core.save_transcript", return_value=tmp_path / "audio.txt"):
+            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
+                mock_save.return_value = tmp_path / "audio.txt"
                 result = runner.invoke(app, ["transcribe", str(fake_audio)])
                 assert result.exit_code == 0
                 assert "Success" in result.stdout
@@ -412,3 +414,34 @@ class TestConfigCommand:
         assert result.exit_code == 0
         assert "--show" in result.stdout
         assert "--init" in result.stdout
+
+
+class TestSetupCommand:
+    """Tests for setup command."""
+
+    def test_setup_check_success(self) -> None:
+        """setup --check should pass when FFmpeg validates."""
+        mock_info = MagicMock()
+        mock_info.version_display = "6.0"
+
+        with patch("shutil.which") as mock_which:
+            mock_which.side_effect = lambda name: f"/usr/bin/{name}"
+            with patch("transcribe_cli.core.validate_ffmpeg", return_value=mock_info):
+                result = runner.invoke(app, ["setup", "--check"])
+
+        assert result.exit_code == 0
+        assert "Dependency Check" in result.stdout
+        assert "FFmpeg 6.0" in result.stdout
+
+    def test_setup_check_fails_on_ffmpeg_validation_error(self) -> None:
+        """setup --check should fail when FFmpeg exists but is invalid."""
+        with patch("shutil.which") as mock_which:
+            mock_which.side_effect = lambda name: f"/usr/bin/{name}"
+            with patch(
+                "transcribe_cli.core.validate_ffmpeg",
+                side_effect=RuntimeError("version too old"),
+            ):
+                result = runner.invoke(app, ["setup", "--check"])
+
+        assert result.exit_code == 1
+        assert "has issues" in result.stdout

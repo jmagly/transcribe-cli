@@ -732,7 +732,7 @@ def setup(
     import subprocess
     import sys
 
-    from transcribe_cli.core import check_ffmpeg_available, validate_ffmpeg
+    from transcribe_cli.core import validate_ffmpeg
 
     if check or (not install_ffmpeg):
         console.print("[bold]Dependency Check[/bold]")
@@ -742,10 +742,12 @@ def setup(
         ffmpeg_path = shutil.which("ffmpeg")
         ffprobe_path = shutil.which("ffprobe")
 
+        ffmpeg_healthy = False
         if ffmpeg_path and ffprobe_path:
             try:
                 info = validate_ffmpeg()
                 console.print(f"  [green]✓[/green] FFmpeg {info.version_display} ({ffmpeg_path})")
+                ffmpeg_healthy = True
             except Exception as e:
                 console.print(f"  [yellow]⚠[/yellow] FFmpeg found but has issues: {e}")
         else:
@@ -813,7 +815,7 @@ def setup(
             console.print("Use [bold]--check[/bold] to verify dependencies.")
             console.print("Use [bold]--install-ffmpeg[/bold] to install FFmpeg.")
 
-        if not (ffmpeg_path and ffprobe_path):
+        if not ffmpeg_healthy:
             raise typer.Exit(1)
 
     if install_ffmpeg:
