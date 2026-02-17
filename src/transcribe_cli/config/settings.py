@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,6 +72,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     # Backend selection: "local" for GPU inference, "api" for OpenAI API
@@ -79,8 +80,8 @@ class Settings(BaseSettings):
 
     # API Configuration (only needed if backend="api")
     # Uses OPENAI_API_KEY (no prefix) for compatibility with OpenAI conventions
-    openai_api_key: SecretStr = Field(
-        default=None,  # type: ignore[assignment]
+    openai_api_key: Optional[SecretStr] = Field(
+        default=None,
         validation_alias="OPENAI_API_KEY",
     )
 
@@ -93,8 +94,8 @@ class Settings(BaseSettings):
 
     # Diarization settings
     diarization: bool = False
-    hf_token: SecretStr = Field(
-        default=None,  # type: ignore[assignment]
+    hf_token: Optional[SecretStr] = Field(
+        default=None,
         validation_alias="HF_TOKEN",
     )
     min_speakers: Optional[int] = None
@@ -102,7 +103,11 @@ class Settings(BaseSettings):
 
     # Output settings
     output_dir: Path = Path(".")
-    output_format: Literal["txt", "srt", "diarized"] = "txt"
+    output_format: Literal["txt", "srt", "diarized"] = Field(
+        default="txt",
+        # Keep compatibility with documented variable while supporting model-style naming.
+        validation_alias=AliasChoices("TRANSCRIBE_FORMAT", "TRANSCRIBE_OUTPUT_FORMAT"),
+    )
 
     # Processing settings
     concurrency: int = 5
@@ -146,11 +151,98 @@ def get_settings(config_path: Optional[Path] = None) -> Settings:
     Raises:
         ValidationError: If required settings are missing or invalid.
     """
-    # Load config file values first
-    file_config = load_config_file(config_path)
+    # Load config file values first and flatten TOML sections to model fields.
+    file_config = _flatten_config(load_config_file(config_path))
 
     # Create settings - env vars will override file config
     return Settings(**file_config)  # type: ignore[arg-type]
+
+
+def _flatten_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Flatten nested TOML sections into Settings field names."""
+    if not config:
+        return {}
+
+    flattened: dict[str, Any] = {}
+
+    # Keep explicit top-level keys if provided.
+    for key in (
+        "backend",
+        "openai_api_key",
+        "model_size",
+        "device",
+        "compute_type",
+        "beam_size",
+        "vad_filter",
+        "diarization",
+        "hf_token",
+        "min_speakers",
+        "max_speakers",
+        "output_dir",
+        "output_format",
+        "concurrency",
+        "language",
+        "chunk_size_minutes",
+        "recursive",
+        "verbose",
+        "quiet",
+    ):
+        if key in config:
+            flattened[key] = config[key]
+
+    output = config.get("output")
+    if isinstance(output, dict):
+        if "dir" in output:
+            flattened["output_dir"] = output["dir"]
+        if "format" in output:
+            flattened["output_format"] = output["format"]
+
+    backend = config.get("backend")
+    if isinstance(backend, dict):
+        if "backend" in backend:
+            flattened["backend"] = backend["backend"]
+
+    local = config.get("local")
+    if isinstance(local, dict):
+        if "model_size" in local:
+            flattened["model_size"] = local["model_size"]
+        if "device" in local:
+            flattened["device"] = local["device"]
+        if "compute_type" in local:
+            flattened["compute_type"] = local["compute_type"]
+        if "beam_size" in local:
+            flattened["beam_size"] = local["beam_size"]
+        if "vad_filter" in local:
+            flattened["vad_filter"] = local["vad_filter"]
+
+    diarization = config.get("diarization")
+    if isinstance(diarization, dict):
+        if "enabled" in diarization:
+            flattened["diarization"] = diarization["enabled"]
+        if "min_speakers" in diarization:
+            flattened["min_speakers"] = diarization["min_speakers"]
+        if "max_speakers" in diarization:
+            flattened["max_speakers"] = diarization["max_speakers"]
+
+    processing = config.get("processing")
+    if isinstance(processing, dict):
+        if "concurrency" in processing:
+            flattened["concurrency"] = processing["concurrency"]
+        if "language" in processing:
+            flattened["language"] = processing["language"]
+        if "chunk_size_minutes" in processing:
+            flattened["chunk_size_minutes"] = processing["chunk_size_minutes"]
+        if "recursive" in processing:
+            flattened["recursive"] = processing["recursive"]
+
+    logging = config.get("logging")
+    if isinstance(logging, dict):
+        if "verbose" in logging:
+            flattened["verbose"] = logging["verbose"]
+        if "quiet" in logging:
+            flattened["quiet"] = logging["quiet"]
+
+    return flattened
 
 
 def get_config_locations() -> list[Path]:
