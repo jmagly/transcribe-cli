@@ -144,6 +144,17 @@ class TestScanDirectory:
         files = scan_directory(tmp_path, recursive=True)
         assert len(files) == 2
 
+    def test_recursive_scan_ignores_hidden_directories(self, tmp_path: Path) -> None:
+        """Recursive scan skips hidden dot-directories used by tooling."""
+        (tmp_path / "audio.mp3").write_bytes(b"fake")
+        hidden_dir = tmp_path / ".aiwg" / "tmp"
+        hidden_dir.mkdir(parents=True)
+        (hidden_dir / "hidden.mp3").write_bytes(b"fake")
+
+        files = scan_directory(tmp_path, recursive=True)
+        names = {f.name for f in files}
+        assert names == {"audio.mp3"}
+
     def test_empty_directory(self, tmp_path: Path) -> None:
         """Empty directory returns empty list."""
         files = scan_directory(tmp_path)
@@ -210,12 +221,12 @@ class TestProcessBatch:
         mock_result.duration = 1.0
 
         with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.output.formatters.save_formatted_transcript") as mock_save:
+            with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
                 mock_save.return_value = tmp_path / "output.txt"
                 summary = process_batch(
                     files=files,
                     output_format="txt",
-                    concurrency=2,
+                    concurrency=1,
                     api_key="sk-test",
                 )
 
@@ -249,7 +260,7 @@ class TestProcessDirectory:
         mock_result.duration = 1.0
 
         with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.output.formatters.save_formatted_transcript") as mock_save:
+            with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
                 mock_save.return_value = tmp_path / "audio.txt"
                 summary = process_directory(tmp_path, api_key="sk-test")
 

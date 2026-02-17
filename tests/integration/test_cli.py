@@ -185,11 +185,10 @@ class TestTranscribeCommand:
         mock_result.duration = 5.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
-                mock_save.return_value = tmp_path / "audio.srt"
-                result = runner.invoke(app, ["transcribe", str(fake_audio), "--format", "srt"])
-                # Should show SRT warning but not fail
-                assert "SRT format will be available" in result.stdout or result.exit_code == 0
+            result = runner.invoke(
+                app, ["transcribe", str(fake_audio), "--format", "srt", "--backend", "api"]
+            )
+            assert result.exit_code == 0
 
     def test_transcribe_with_mock_success(self, tmp_path: Path) -> None:
         """transcribe should succeed with mocked API."""
@@ -203,11 +202,9 @@ class TestTranscribeCommand:
         mock_result.duration = 10.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
-                mock_save.return_value = tmp_path / "audio.txt"
-                result = runner.invoke(app, ["transcribe", str(fake_audio)])
-                assert result.exit_code == 0
-                assert "Success" in result.stdout
+            result = runner.invoke(app, ["transcribe", str(fake_audio), "--backend", "api"])
+            assert result.exit_code == 0
+            assert "Success" in result.stdout
 
     def test_transcribe_api_key_missing(self, tmp_path: Path) -> None:
         """transcribe should show helpful error when API key missing."""
@@ -220,7 +217,7 @@ class TestTranscribeCommand:
             "transcribe_cli.core.transcribe_file",
             side_effect=APIKeyMissingError(),
         ):
-            result = runner.invoke(app, ["transcribe", str(fake_audio)])
+            result = runner.invoke(app, ["transcribe", str(fake_audio), "--backend", "api"])
             assert result.exit_code == 1
             assert "OPENAI_API_KEY" in result.stdout or "Error" in result.stdout
 
@@ -235,7 +232,7 @@ class TestTranscribeCommand:
             "transcribe_cli.core.transcribe_file",
             side_effect=FileTooLargeError(fake_audio, 30.0, 25.0),
         ):
-            result = runner.invoke(app, ["transcribe", str(fake_audio)])
+            result = runner.invoke(app, ["transcribe", str(fake_audio), "--backend", "api"])
             assert result.exit_code == 1
             assert "too large" in result.stdout.lower() or "Error" in result.stdout
 
@@ -252,13 +249,19 @@ class TestTranscribeCommand:
         mock_result.duration = 1.0
 
         with patch("transcribe_cli.core.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.output.save_formatted_transcript") as mock_save:
-                mock_save.return_value = output_dir / "audio.txt"
-                result = runner.invoke(
-                    app, ["transcribe", str(fake_audio), "--output-dir", str(output_dir)]
-                )
-                # Verify output_dir was created
-                assert result.exit_code == 0
+            result = runner.invoke(
+                app,
+                [
+                    "transcribe",
+                    str(fake_audio),
+                    "--output-dir",
+                    str(output_dir),
+                    "--backend",
+                    "api",
+                ],
+            )
+            # Verify output_dir was created
+            assert result.exit_code == 0
 
 
 class TestBatchCommand:

@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
+from transcribe_cli.output import save_formatted_transcript
+
 from .extractor import SUPPORTED_EXTENSIONS, is_supported_file
 from .transcriber import (
     TranscriptionResult,
@@ -73,9 +75,13 @@ def scan_directory(
         raise ValueError(f"Path is not a directory: {directory}")
 
     files = []
-    pattern = "**/*" if recursive else "*"
+    paths = directory.rglob("*") if recursive else directory.glob("*")
 
-    for path in directory.glob(pattern):
+    for path in paths:
+        # Ignore hidden paths (e.g., .git/, .aiwg/, .codex/) for tool/workspace hygiene.
+        rel_path = path.relative_to(directory)
+        if any(part.startswith(".") for part in rel_path.parts):
+            continue
         if path.is_file() and is_supported_file(path):
             files.append(path)
 
@@ -118,24 +124,20 @@ async def _process_file_async(
             else:
                 output_path = input_path.with_suffix(f".{output_format}")
 
-            # Run transcription in thread pool (blocking I/O)
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: transcribe_file(
-                    input_path=input_path,
-                    output_path=output_path,
-                    language=language,
-                    api_key=api_key,
-                ),
+            # Run blocking transcription/output work in worker threads.
+            result = await asyncio.to_thread(
+                transcribe_file,
+                input_path=input_path,
+                output_path=output_path,
+                language=language,
+                api_key=api_key,
             )
 
-            # Save with formatter
-            from transcribe_cli.output import save_formatted_transcript
-
-            saved_path = await loop.run_in_executor(
-                None,
-                lambda: save_formatted_transcript(result, output_path, output_format),
+            saved_path = await asyncio.to_thread(
+                save_formatted_transcript,
+                result,
+                output_path,
+                output_format,
             )
 
             if progress_callback:
