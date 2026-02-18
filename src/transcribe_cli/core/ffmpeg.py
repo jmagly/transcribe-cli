@@ -118,16 +118,19 @@ def parse_version(version_output: str) -> tuple[int, int]:
         ValueError: If version cannot be parsed.
     """
     # Match patterns like "ffmpeg version 5.1.2" or "ffmpeg version n5.1"
-    patterns = [
-        r"ffmpeg version (\d+)\.(\d+)",  # Standard: 5.1.2
-        r"ffmpeg version n(\d+)\.(\d+)",  # Git builds: n5.1
-        r"ffmpeg version N-(\d+)",  # Development builds
+    patterns: list[tuple[str, bool]] = [
+        (r"ffmpeg version (\d+)\.(\d+)", False),  # Standard: 5.1.2
+        (r"ffmpeg version n(\d+)\.(\d+)", False),  # Git builds: n5.1
+        (r"ffmpeg version N-(\d+)", True),  # Development builds (minor unknown)
     ]
 
-    for pattern in patterns:
+    for pattern, is_major_only in patterns:
         match = re.search(pattern, version_output, re.IGNORECASE)
-        if match:
-            return (int(match.group(1)), int(match.group(2)))
+        if not match:
+            continue
+        if is_major_only:
+            return (int(match.group(1)), 0)
+        return (int(match.group(1)), int(match.group(2)))
 
     raise ValueError(f"Could not parse FFmpeg version from: {version_output[:100]}")
 

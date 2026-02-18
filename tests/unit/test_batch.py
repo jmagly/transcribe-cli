@@ -8,6 +8,7 @@ import pytest
 from transcribe_cli.core.batch import (
     BatchResult,
     BatchSummary,
+    process_batch_async,
     scan_directory,
 )
 
@@ -220,19 +221,110 @@ class TestProcessBatch:
         mock_result.language = "en"
         mock_result.duration = 1.0
 
-        with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
-                mock_save.return_value = tmp_path / "output.txt"
-                summary = process_batch(
-                    files=files,
-                    output_format="txt",
-                    concurrency=1,
-                    api_key="sk-test",
-                )
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
+                with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
+                    mock_save.return_value = tmp_path / "output.txt"
+                    summary = process_batch(
+                        files=files,
+                        output_format="txt",
+                        concurrency=1,
+                        api_key="sk-test",
+                    )
 
         assert summary.total_files == 2
         assert summary.successful == 2
         assert summary.failed == 0
+
+
+class TestProcessBatchAsync:
+    """Deterministic tests for async batch processing path."""
+
+    @pytest.mark.asyncio
+    async def test_process_batch_async_success(self, tmp_path: Path) -> None:
+        """Async batch processing succeeds without real thread executor use."""
+        from transcribe_cli.core.transcriber import TranscriptionResult
+
+        files = [tmp_path / "a.mp3", tmp_path / "b.mp3"]
+        for path in files:
+            path.write_bytes(b"fake")
+        output_dir = tmp_path / "out"
+        callback_events = []
+
+        mock_result = MagicMock(spec=TranscriptionResult)
+        mock_result.text = "Test"
+        mock_result.segments = []
+        mock_result.language = "en"
+        mock_result.duration = 1.0
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch(
+                "transcribe_cli.core.batch.transcribe_file",
+                return_value=mock_result,
+            ):
+                with patch(
+                    "transcribe_cli.core.batch.save_formatted_transcript",
+                ) as mock_save:
+                    mock_save.side_effect = [tmp_path / "a.txt", tmp_path / "b.txt"]
+                    summary = await process_batch_async(
+                        files=files,
+                        output_dir=output_dir,
+                        output_format="txt",
+                        concurrency=2,
+                        api_key="sk-test",
+                        progress_callback=lambda path, status: callback_events.append(
+                            (path.name, status)
+                        ),
+                    )
+
+        assert summary.total_files == 2
+        assert summary.successful == 2
+        assert summary.failed == 0
+        assert len(summary.results) == 2
+        assert all(result.success for result in summary.results)
+        assert output_dir.exists()
+        assert callback_events.count(("a.mp3", "started")) == 1
+        assert callback_events.count(("a.mp3", "completed")) == 1
+        assert callback_events.count(("b.mp3", "started")) == 1
+        assert callback_events.count(("b.mp3", "completed")) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_batch_async_failure(self, tmp_path: Path) -> None:
+        """Async batch processing captures per-file failures deterministically."""
+        files = [tmp_path / "a.mp3"]
+        files[0].write_bytes(b"fake")
+        callback_events = []
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch(
+                "transcribe_cli.core.batch.transcribe_file",
+                side_effect=RuntimeError("transcription failed"),
+            ):
+                summary = await process_batch_async(
+                    files=files,
+                    output_format="txt",
+                    concurrency=1,
+                    api_key="sk-test",
+                    progress_callback=lambda path, status: callback_events.append(
+                        (path.name, status)
+                    ),
+                )
+
+        assert summary.total_files == 1
+        assert summary.successful == 0
+        assert summary.failed == 1
+        assert summary.results[0].success is False
+        assert summary.results[0].error == "transcription failed"
+        assert callback_events == [("a.mp3", "started"), ("a.mp3", "failed")]
 
 
 class TestProcessDirectory:
@@ -259,10 +351,14 @@ class TestProcessDirectory:
         mock_result.language = "en"
         mock_result.duration = 1.0
 
-        with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
-            with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
-                mock_save.return_value = tmp_path / "audio.txt"
-                summary = process_directory(tmp_path, api_key="sk-test")
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch("transcribe_cli.core.batch.transcribe_file", return_value=mock_result):
+                with patch("transcribe_cli.core.batch.save_formatted_transcript") as mock_save:
+                    mock_save.return_value = tmp_path / "audio.txt"
+                    summary = process_directory(tmp_path, api_key="sk-test")
 
         assert summary.total_files == 1
         assert summary.successful == 1

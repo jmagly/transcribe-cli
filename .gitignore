@@ -39,6 +39,11 @@ htmlcov/
 # Claude
 .claude/settings.local.json
 
+# Agentic tooling state
+.codex/
+.claude/
+.aiwg/working/
+
 # Temp files
 *.tmp
 *.temp

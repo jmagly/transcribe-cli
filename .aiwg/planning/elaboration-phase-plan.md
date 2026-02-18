@@ -4,8 +4,8 @@
 **Phase**: Elaboration
 **Duration**: 4-6 weeks (Sprints 1-3)
 **Target Milestone**: Lifecycle Architecture (LA)
-**Start Date**: 2025-12-04
-**Target End Date**: 2025-01-15
+**Start Date**: 2025-12-05
+**Target End Date**: 2026-01-16
 
 ---
 

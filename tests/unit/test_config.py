@@ -9,9 +9,11 @@ from pydantic import ValidationError
 
 from transcribe_cli.config.settings import (
     Settings,
+    _flatten_config,
     create_default_config,
     find_config_file,
     get_config_locations,
+    get_settings,
     load_config_file,
 )
 
@@ -25,11 +27,11 @@ class TestSettings:
             settings = Settings(_env_file=None)
             assert settings.openai_api_key.get_secret_value() == "sk-test-key"
 
-    def test_settings_requires_api_key(self) -> None:
-        """Settings should raise error when API key is missing."""
+    def test_settings_allows_missing_api_key(self) -> None:
+        """Settings can be created without API key (checked at transcription time)."""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValidationError):
-                Settings(_env_file=None)
+            settings = Settings(_env_file=None)
+            assert settings.openai_api_key is None
 
     def test_settings_default_values(self) -> None:
         """Settings should have correct default values."""
@@ -84,6 +86,16 @@ class TestSettings:
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
             settings = Settings(_env_file=None)
             assert settings.recursive is False
+
+    def test_settings_output_format_legacy_env_var(self) -> None:
+        """TRANSCRIBE_FORMAT should map to output_format for backward compatibility."""
+        with patch.dict(
+            os.environ,
+            {"OPENAI_API_KEY": "sk-test", "TRANSCRIBE_FORMAT": "srt"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+            assert settings.output_format == "srt"
 
 
 class TestFindConfigFile:
@@ -177,6 +189,58 @@ class TestCreateDefaultConfig:
 
         assert result.exists()
         assert result.parent.exists()
+
+
+class TestFlattenConfig:
+    """Tests for config flattening helper."""
+
+    def test_flattens_nested_sections(self) -> None:
+        """Nested TOML sections are mapped to Settings field names."""
+        flattened = _flatten_config(
+            {
+                "output": {"format": "srt", "dir": "./transcripts"},
+                "processing": {"concurrency": 3, "language": "es", "recursive": True},
+                "logging": {"verbose": True, "quiet": False},
+            }
+        )
+
+        assert flattened["output_format"] == "srt"
+        assert flattened["output_dir"] == "./transcripts"
+        assert flattened["concurrency"] == 3
+        assert flattened["language"] == "es"
+        assert flattened["recursive"] is True
+        assert flattened["verbose"] is True
+
+
+class TestGetSettings:
+    """Tests for get_settings helper."""
+
+    def test_get_settings_uses_nested_file_config(self, tmp_path: Path) -> None:
+        """Nested config file values are respected by get_settings."""
+        config = tmp_path / "transcribe.toml"
+        config.write_text(
+            """
+[output]
+format = "srt"
+
+[processing]
+concurrency = 2
+language = "fr"
+recursive = true
+
+[logging]
+verbose = true
+"""
+        )
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True):
+            settings = get_settings(config)
+
+        assert settings.output_format == "srt"
+        assert settings.concurrency == 2
+        assert settings.language == "fr"
+        assert settings.recursive is True
+        assert settings.verbose is True
 
 
 class TestGetConfigLocations:

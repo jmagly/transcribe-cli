@@ -201,7 +201,7 @@ The following conditions must be met before starting Elaboration:
 **Milestone**: Lifecycle Architecture (LA)
 **Phase**: Elaboration
 **Duration**: 4-6 weeks (Sprint 1-3)
-**Target Date**: 2025-01-15 (approximate)
+**Target Date**: 2026-01-16 (approximate)
 
 **Key Deliverables**:
 1. Software Architecture Document (SAD) - BASELINED

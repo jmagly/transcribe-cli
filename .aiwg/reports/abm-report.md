@@ -224,7 +224,7 @@ The Audio Transcription CLI Tool has successfully achieved the Architecture Base
 **Milestone**: Initial Operational Capability (IOC)
 **Phase**: Construction
 **Duration**: 10-12 weeks (Sprints 1-6)
-**Target Date**: 2025-02-28 (approximate)
+**Target Date**: 2026-04-10 (approximate)
 
 **Key Criteria**:
 - All MVP features implemented

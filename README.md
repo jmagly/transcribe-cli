@@ -8,8 +8,7 @@ CLI tool for transcribing audio and video files using OpenAI Whisper API.
 - **Video Support**: Extract and transcribe audio from MKV, MP4, AVI, MOV
 - **Batch Processing**: Process entire directories with concurrent API calls
 - **Multiple Output Formats**: Plain text (TXT) and subtitles (SRT)
-- **Large File Support**: Automatic chunking for files >25MB
-- **Resume Support**: Continue interrupted transcriptions
+- **File Size Guardrails**: Clear error when Whisper API 25MB upload limit is exceeded
 
 ## Requirements
 
@@ -104,7 +103,8 @@ Options:
   -o, --output-dir PATH   Output directory
   -f, --format TEXT       Output format: txt, srt
   -c, --concurrency INT   Max concurrent jobs (1-20, default: 5)
-  -r, --recursive         Scan subdirectories
+  --recursive             Scan subdirectories
+  --no-recursive          Disable recursive scan
   --dry-run               Preview files without processing
   --verbose               Enable verbose output
   --help                  Show help message
@@ -185,6 +185,7 @@ Settings can also be configured via environment variables:
 | `OPENAI_API_KEY` | OpenAI API key (required) | - |
 | `TRANSCRIBE_OUTPUT_DIR` | Default output directory | `.` |
 | `TRANSCRIBE_FORMAT` | Default output format | `txt` |
+| `TRANSCRIBE_OUTPUT_FORMAT` | Alternate output format variable (also supported) | `txt` |
 | `TRANSCRIBE_CONCURRENCY` | Max concurrent jobs | `5` |
 | `TRANSCRIBE_LANGUAGE` | Default language | `auto` |
 

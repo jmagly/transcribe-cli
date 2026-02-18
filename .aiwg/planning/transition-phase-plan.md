@@ -1,5 +1,12 @@
 # Transition Phase Plan
 
+**Project**: Audio Transcription CLI Tool
+**Phase**: Transition
+**Duration**: 4 weeks (2 Sprints)
+**Target Milestone**: Production Readiness and Handover
+**Start Date**: 2026-04-13
+**Target End Date**: 2026-05-08
+
 ## Phase Goal
 Prepare transcribe-cli for production release with documentation, packaging, and CI/CD.
 
@@ -27,9 +34,9 @@ Prepare transcribe-cli for production release with documentation, packaging, and
 - Contributing guidelines (optional)
 
 ## Timeline
-- Documentation: Immediate
-- CI/CD Setup: Immediate
-- Release: Ready for v0.1.0
+- Sprint T1 (2026-04-13 to 2026-04-24): hardening, release candidate validation, docs completion
+- Sprint T2 (2026-04-27 to 2026-05-08): release cutover, support handoff, training completion
+- Target release readiness review: 2026-05-08
 
 ## Success Criteria
 - [ ] README provides complete usage guide

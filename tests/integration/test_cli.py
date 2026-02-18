@@ -448,3 +448,122 @@ class TestSetupCommand:
 
         assert result.exit_code == 1
         assert "has issues" in result.stdout
+
+
+class TestE2EWorkflows:
+    """Workflow-style integration tests with real file outputs."""
+
+    def test_transcribe_local_writes_transcript_file(self, tmp_path: Path) -> None:
+        """transcribe (local backend) should create transcript output file."""
+        from transcribe_cli.core.transcriber import TranscriptionResult
+
+        audio_file = tmp_path / "meeting.mp3"
+        audio_file.write_bytes(b"fake audio")
+        output_dir = tmp_path / "out"
+
+        mock_result = TranscriptionResult(
+            input_path=audio_file,
+            output_path=None,
+            text="Hello integration world",
+            segments=[],
+            language="en",
+            duration=3.5,
+        )
+
+        with patch("transcribe_cli.core.transcribe_file_local", return_value=mock_result):
+            result = runner.invoke(
+                app,
+                [
+                    "transcribe",
+                    str(audio_file),
+                    "--backend",
+                    "local",
+                    "--output-dir",
+                    str(output_dir),
+                ],
+            )
+
+        assert result.exit_code == 0
+        output_file = output_dir / "meeting.txt"
+        assert output_file.exists()
+        assert output_file.read_text(encoding="utf-8") == "Hello integration world"
+
+    def test_batch_end_to_end_creates_outputs(self, tmp_path: Path) -> None:
+        """batch command should scan directory and write transcripts."""
+        from transcribe_cli.core.transcriber import TranscriptionResult
+
+        (tmp_path / "audio1.mp3").write_bytes(b"a1")
+        (tmp_path / "audio2.mp3").write_bytes(b"a2")
+        output_dir = tmp_path / "batch-out"
+
+        def fake_transcribe_file(input_path, output_path, language, api_key):
+            return TranscriptionResult(
+                input_path=input_path,
+                output_path=output_path,
+                text=f"Transcript for {input_path.stem}",
+                segments=[],
+                language="en",
+                duration=1.0,
+            )
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch(
+                "transcribe_cli.core.batch.transcribe_file",
+                side_effect=fake_transcribe_file,
+            ):
+                result = runner.invoke(
+                    app,
+                    ["batch", str(tmp_path), "--output-dir", str(output_dir)],
+                )
+
+        assert result.exit_code == 0
+        assert (output_dir / "audio1.txt").exists()
+        assert (output_dir / "audio2.txt").exists()
+        assert "Successful" in result.stdout
+        assert "2" in result.stdout
+
+    def test_batch_recursive_end_to_end_writes_nested_outputs(self, tmp_path: Path) -> None:
+        """batch --recursive should include nested files in processing."""
+        from transcribe_cli.core.transcriber import TranscriptionResult
+
+        (tmp_path / "root.mp3").write_bytes(b"root")
+        nested_dir = tmp_path / "nested"
+        nested_dir.mkdir()
+        (nested_dir / "child.mp3").write_bytes(b"child")
+        output_dir = tmp_path / "recursive-out"
+
+        def fake_transcribe_file(input_path, output_path, language, api_key):
+            return TranscriptionResult(
+                input_path=input_path,
+                output_path=output_path,
+                text=f"Transcript for {input_path.name}",
+                segments=[],
+                language="en",
+                duration=1.0,
+            )
+
+        async def fake_to_thread(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with patch("transcribe_cli.core.batch.asyncio.to_thread", side_effect=fake_to_thread):
+            with patch(
+                "transcribe_cli.core.batch.transcribe_file",
+                side_effect=fake_transcribe_file,
+            ):
+                result = runner.invoke(
+                    app,
+                    [
+                        "batch",
+                        str(tmp_path),
+                        "--recursive",
+                        "--output-dir",
+                        str(output_dir),
+                    ],
+                )
+
+        assert result.exit_code == 0
+        assert (output_dir / "root.txt").exists()
+        assert (output_dir / "child.txt").exists()

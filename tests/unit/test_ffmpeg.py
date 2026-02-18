@@ -42,6 +42,11 @@ class TestParseVersion:
         output = "ffmpeg version 6.0 Copyright (c) 2000-2023"
         assert parse_version(output) == (6, 0)
 
+    def test_parse_development_build_version(self) -> None:
+        """Parse N- development build version."""
+        output = "ffmpeg version N-123456-gabcdef"
+        assert parse_version(output) == (123456, 0)
+
     def test_parse_invalid_version_raises(self) -> None:
         """Invalid version string raises ValueError."""
         with pytest.raises(ValueError, match="Could not parse"):

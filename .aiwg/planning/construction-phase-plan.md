@@ -4,8 +4,8 @@
 **Phase**: Construction
 **Duration**: 12 weeks (6 Sprints)
 **Target Milestone**: Initial Operational Capability (IOC)
-**Start Date**: 2025-12-04
-**Target End Date**: 2025-02-28
+**Start Date**: 2026-01-19
+**Target End Date**: 2026-04-10
 
 ---
 
