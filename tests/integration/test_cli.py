@@ -450,6 +450,71 @@ class TestSetupCommand:
         assert "has issues" in result.stdout
 
 
+class TestWhisperXCommand:
+    """Tests for WhisperX wrapper command."""
+
+    def test_whisperx_help(self) -> None:
+        """whisperx --help should show command help."""
+        result = runner.invoke(app, ["whisperx", "--help"])
+        assert result.exit_code == 0
+        assert "WhisperX" in result.stdout
+        assert "--output-dir" in result.stdout
+
+    def test_whisperx_invalid_format(self, tmp_path: Path) -> None:
+        """whisperx should reject unsupported format values."""
+        media_file = tmp_path / "audio.mp3"
+        media_file.write_bytes(b"fake")
+
+        result = runner.invoke(app, ["whisperx", str(media_file), "--format", "pdf"])
+        assert result.exit_code == 1
+        assert "Unsupported format" in result.stdout
+
+    def test_whisperx_success(self, tmp_path: Path) -> None:
+        """whisperx wrapper should report success when subprocess exits 0."""
+        media_file = tmp_path / "audio.mp3"
+        media_file.write_bytes(b"fake")
+        output_dir = tmp_path / "wx-out"
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "done"
+        mock_proc.stderr = ""
+
+        with patch("transcribe_cli.cli.main.subprocess.run", return_value=mock_proc):
+            with patch(
+                "transcribe_cli.cli.main._resolve_whisperx_command",
+                return_value=["whisperx"],
+            ):
+                result = runner.invoke(
+                    app,
+                    ["whisperx", str(media_file), "--output-dir", str(output_dir)],
+                )
+
+        assert result.exit_code == 0
+        assert "Success" in result.stdout
+        assert str(output_dir.resolve()) in result.stdout
+
+    def test_whisperx_not_installed_error(self, tmp_path: Path) -> None:
+        """whisperx wrapper should show install hint on missing module."""
+        media_file = tmp_path / "audio.mp3"
+        media_file.write_bytes(b"fake")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = ""
+        mock_proc.stderr = "No module named whisperx"
+
+        with patch("transcribe_cli.cli.main.subprocess.run", return_value=mock_proc):
+            with patch(
+                "transcribe_cli.cli.main._resolve_whisperx_command",
+                return_value=["python", "-m", "whisperx"],
+            ):
+                result = runner.invoke(app, ["whisperx", str(media_file)])
+
+        assert result.exit_code == 1
+        assert "WhisperX is not installed" in result.stdout
+
+
 class TestE2EWorkflows:
     """Workflow-style integration tests with real file outputs."""
 

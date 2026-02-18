@@ -8,6 +8,9 @@ Implements ADR-004: CLI Framework Selection (Typer)
 Supports both local GPU inference (faster-whisper) and OpenAI API backends.
 """
 
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -23,6 +26,14 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 console = Console()
+
+
+def _resolve_whisperx_command() -> list[str]:
+    """Resolve whisperx executable command."""
+    whisperx_bin = shutil.which("whisperx")
+    if whisperx_bin:
+        return [whisperx_bin]
+    return [sys.executable, "-m", "whisperx"]
 
 
 def version_callback(value: bool) -> None:
@@ -403,6 +414,97 @@ def extract(
     except FileNotFoundError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+@app.command()
+def whisperx(
+    file: Path = typer.Argument(
+        ...,
+        help="Audio or video file to transcribe with WhisperX.",
+        exists=True,
+        readable=True,
+    ),
+    output_dir: Path = typer.Option(
+        Path("."),
+        "--output-dir",
+        "-o",
+        help="Output directory for WhisperX artifacts.",
+    ),
+    format: str = typer.Option(
+        "srt",
+        "--format",
+        "-f",
+        help="WhisperX output format: txt, srt, vtt, json.",
+    ),
+    model: str = typer.Option(
+        "small",
+        "--model",
+        "-m",
+        help="WhisperX model size/name.",
+    ),
+    device: str = typer.Option(
+        "cuda",
+        "--device",
+        help="Device: cuda or cpu.",
+    ),
+    compute_type: str = typer.Option(
+        "float16",
+        "--compute-type",
+        help="Compute type for WhisperX model execution.",
+    ),
+    language: Optional[str] = typer.Option(
+        None,
+        "--language",
+        "-l",
+        help="Optional language code (e.g., en, es).",
+    ),
+) -> None:
+    """Run WhisperX directly as a thin wrapper command."""
+    output_dir = output_dir.resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    valid_formats = ("txt", "srt", "vtt", "json")
+    if format not in valid_formats:
+        console.print(f"[red]Error:[/red] Unsupported format '{format}'. Use: {', '.join(valid_formats)}")
+        raise typer.Exit(1)
+
+    cmd = _resolve_whisperx_command()
+    cmd.extend(
+        [
+            str(file),
+            "--output_dir",
+            str(output_dir),
+            "--output_format",
+            format,
+            "--model",
+            model,
+            "--device",
+            device,
+            "--compute_type",
+            compute_type,
+        ]
+    )
+
+    if language:
+        cmd.extend(["--language", language])
+
+    console.print(f"[bold blue]Running WhisperX:[/bold blue] {file}")
+    with console.status("[bold green]Executing WhisperX...[/bold green]"):
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()
+        if "No module named whisperx" in err or "command not found" in err:
+            console.print("[red]Error:[/red] WhisperX is not installed.")
+            console.print("[dim]Install with: pip install whisperx[/dim]")
+        else:
+            console.print("[red]WhisperX failed:[/red]")
+            console.print(err if err else "[dim]No error output captured[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Success![/green] WhisperX outputs saved to: {output_dir}")
+    if result.stdout.strip():
+        console.print(f"[dim]{result.stdout.strip()}[/dim]")
 
 
 @app.command()
@@ -799,6 +901,20 @@ def setup(
         except ImportError:
             console.print("  [dim]Not installed (optional feature)[/dim]")
             console.print("  [dim]    Install: pip install transcribe-cli[diarization][/dim]")
+
+        # Check WhisperX wrapper runtime
+        console.print()
+        console.print("[bold]WhisperX (optional/minimal wrapper backend):[/bold]")
+        whisperx_bin = shutil.which("whisperx")
+        if whisperx_bin:
+            console.print(f"  [green]✓[/green] whisperx executable: {whisperx_bin}")
+        else:
+            try:
+                import whisperx  # type: ignore
+                console.print("  [green]✓[/green] whisperx python module available")
+            except ImportError:
+                console.print("  [dim]Not installed (optional feature)[/dim]")
+                console.print("  [dim]    Install: pip install whisperx[/dim]")
 
         # Check API key (optional now)
         console.print()

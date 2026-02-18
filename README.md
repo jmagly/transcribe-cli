@@ -9,6 +9,7 @@ CLI tool for transcribing audio and video files using OpenAI Whisper API.
 - **Batch Processing**: Process entire directories with concurrent API calls
 - **Multiple Output Formats**: Plain text (TXT) and subtitles (SRT)
 - **File Size Guardrails**: Clear error when Whisper API 25MB upload limit is exceeded
+- **WhisperX Wrapper**: Optional thin wrapper command around upstream WhisperX
 
 ## Requirements
 
@@ -132,6 +133,32 @@ Options:
   -f, --format TEXT       Output format: mp3, wav (default: mp3)
   --verbose               Enable verbose output
   --help                  Show help message
+```
+
+### WhisperX Command (Minimal Wrapper)
+
+```bash
+transcribe whisperx <file> [OPTIONS]
+
+Options:
+  -o, --output-dir PATH   Output directory for WhisperX artifacts
+  -f, --format TEXT       Output format: txt, srt, vtt, json (default: srt)
+  -m, --model TEXT        WhisperX model name/size (default: small)
+  --device TEXT           Device: cuda or cpu (default: cuda)
+  --compute-type TEXT     Compute type (default: float16)
+  -l, --language TEXT     Optional language code
+  --help                  Show help message
+```
+
+**Examples:**
+```bash
+transcribe whisperx meeting.mkv --format srt --output-dir ./wx-output
+transcribe whisperx meeting.mkv --device cpu --compute-type int8
+```
+
+Install WhisperX if needed:
+```bash
+pip install whisperx
 ```
 
 ### Config Command
