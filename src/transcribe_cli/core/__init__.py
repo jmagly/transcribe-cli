@@ -58,6 +58,18 @@ from .diarizer import (
     merge_transcription_with_diarization,
     transcribe_and_diarize,
 )
+from .postprocess import (
+    DiarizedSegmentSimple,
+    apply_speaker_mapping,
+    build_diarized_json,
+    extract_speaker_labels,
+    generate_reports,
+    generate_speaker_config,
+    load_speaker_config,
+    load_whisperx_json,
+    segments_from_whisperx_json,
+    write_diarized_outputs,
+)
 
 __all__ = [
     # FFmpeg
@@ -103,6 +115,17 @@ __all__ = [
     "diarize_audio",
     "merge_transcription_with_diarization",
     "transcribe_and_diarize",
+    # Postprocess
+    "DiarizedSegmentSimple",
+    "apply_speaker_mapping",
+    "build_diarized_json",
+    "extract_speaker_labels",
+    "generate_reports",
+    "generate_speaker_config",
+    "load_speaker_config",
+    "load_whisperx_json",
+    "segments_from_whisperx_json",
+    "write_diarized_outputs",
     # Batch
     "BatchResult",
     "BatchSummary",

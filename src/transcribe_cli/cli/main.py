@@ -119,6 +119,11 @@ def transcribe(
         "-d",
         help="Enable speaker diarization (requires HF_TOKEN).",
     ),
+    postprocess_outputs: bool = typer.Option(
+        True,
+        "--postprocess/--no-postprocess",
+        help="Generate speaker config, relabeled outputs, and reports when diarizing.",
+    ),
     min_speakers: Optional[int] = typer.Option(
         None,
         "--min-speakers",
@@ -164,6 +169,13 @@ def transcribe(
         DiarizationError,
         DiarizationNotAvailable,
         transcribe_and_diarize,
+        # Postprocess
+        apply_speaker_mapping,
+        generate_reports,
+        generate_speaker_config,
+        load_speaker_config,
+        segments_from_whisperx_json,
+        write_diarized_outputs,
     )
 
     from transcribe_cli.output import format_transcript, save_formatted_transcript
@@ -293,6 +305,47 @@ def transcribe(
                 console.print(f"[dim]  Duration: {result.duration:.1f}s[/dim]")
             if diarize and hasattr(result, 'speakers'):
                 console.print(f"[dim]  Speakers: {', '.join(result.speakers)}[/dim]")
+
+        if diarize and postprocess_outputs:
+            if hasattr(result, "segments") and hasattr(result, "speakers"):
+                post_dir = output_path.parent / "postprocess"
+                post_dir.mkdir(parents=True, exist_ok=True)
+                speaker_config = post_dir / "speakers.json"
+
+                if not speaker_config.exists():
+                    generate_speaker_config(speaker_config, file, list(result.speakers))
+                    console.print(f"[green]Generated speaker config:[/green] {speaker_config}")
+
+                mapping = load_speaker_config(speaker_config)
+                segments = []
+                for seg in result.segments:
+                    segments.append(
+                        {
+                            "start": seg.start,
+                            "end": seg.end,
+                            "text": seg.text,
+                            "speaker": getattr(seg, "speaker", None),
+                        }
+                    )
+                data = {
+                    "segments": segments,
+                    "word_segments": [],
+                    "language": result.language,
+                }
+
+                updated = apply_speaker_mapping(data, mapping)
+                updated_segments = segments_from_whisperx_json(updated)
+                outputs = write_diarized_outputs(output_path.stem, post_dir, updated, updated_segments)
+                reports_dir = post_dir / "reports"
+                generate_reports(updated_segments, reports_dir, file)
+
+                console.print(f"[green]Postprocess complete:[/green] {post_dir}")
+                if verbose:
+                    for label, path in outputs.items():
+                        console.print(f"[dim]  {label}: {path}[/dim]")
+                    console.print(f"[dim]  reports: {reports_dir}[/dim]")
+            else:
+                console.print("[yellow]Note:[/yellow] Postprocess skipped (no diarized segments available).")
 
     except APIKeyMissingError as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -684,6 +737,76 @@ def batch(
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
+
+
+@app.command()
+def postprocess(
+    whisperx_json: Path = typer.Argument(
+        ...,
+        help="WhisperX diarized JSON to post-process.",
+        exists=True,
+        readable=True,
+    ),
+    output_dir: Path = typer.Option(
+        ...,
+        "--output-dir",
+        "-o",
+        help="Directory for updated speaker outputs and reports.",
+    ),
+    speaker_config: Optional[Path] = typer.Option(
+        None,
+        "--speaker-config",
+        help="Speaker mapping JSON. If missing, a template will be generated.",
+    ),
+    top_terms: int = typer.Option(
+        20,
+        "--top-terms",
+        help="Top terms to include in analysis summary.",
+    ),
+) -> None:
+    """Post-process a diarized WhisperX JSON.
+
+    Generates a speaker config template (if needed), applies speaker labels,
+    writes updated diarized outputs, and generates reports.
+    """
+    from transcribe_cli.core import (
+        apply_speaker_mapping,
+        extract_speaker_labels,
+        generate_reports,
+        generate_speaker_config,
+        load_speaker_config,
+        load_whisperx_json,
+        segments_from_whisperx_json,
+        write_diarized_outputs,
+    )
+
+    output_dir = Path(output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    data = load_whisperx_json(whisperx_json)
+    labels = extract_speaker_labels(data)
+
+    if not speaker_config:
+        speaker_config = output_dir / "speakers.json"
+
+    if not speaker_config.exists():
+        generate_speaker_config(speaker_config, whisperx_json, labels)
+        console.print(f"[green]Generated speaker config:[/green] {speaker_config}")
+
+    mapping = load_speaker_config(speaker_config)
+    updated = apply_speaker_mapping(data, mapping)
+
+    segments = segments_from_whisperx_json(updated)
+    base_name = Path(whisperx_json).stem
+
+    outputs = write_diarized_outputs(base_name, output_dir, updated, segments)
+    reports_dir = output_dir / "reports"
+    generate_reports(segments, reports_dir, whisperx_json, top_n=top_terms)
+
+    console.print("[green]Post-process complete.[/green]")
+    for label, path in outputs.items():
+        console.print(f"  {label}: {path}")
+    console.print(f"  reports: {reports_dir}")
 
 
 @app.command()
