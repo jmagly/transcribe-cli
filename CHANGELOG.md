@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - README section documenting the diarization and speaker-naming workflow.
+- MIT `LICENSE` file (the package already declared MIT in `pyproject.toml`).
+
+### Infrastructure
+- CI workflow moved to `.gitea/workflows/` so it runs only on Gitea; the public GitHub mirror runs no Actions.
 
 ## [0.1.0] - 2024-12-04
 
