@@ -108,7 +108,7 @@ def _speaker_sort_key(label: str) -> tuple[int, str]:
 def extract_speaker_labels(data: dict) -> list[str]:
     labels = set()
     for seg in data.get("segments", []):
-        speaker = seg.get("speaker")
+        speaker = seg.get("speaker_raw") or seg.get("speaker")
         if speaker:
             labels.add(speaker)
     return sorted(labels, key=_speaker_sort_key)
@@ -142,14 +142,15 @@ def load_speaker_config(config_path: Path) -> dict[str, str]:
 def apply_speaker_mapping(data: dict, mapping: dict[str, str]) -> dict:
     updated = json.loads(json.dumps(data))
     for seg in updated.get("segments", []):
-        speaker = seg.get("speaker")
+        # Key on the original diarizer label so mappings can be re-applied
+        speaker = seg.get("speaker_raw") or seg.get("speaker")
         if speaker and speaker in mapping:
-            seg.setdefault("speaker_raw", speaker)
+            seg["speaker_raw"] = speaker
             seg["speaker"] = mapping[speaker]
         for word in seg.get("words", []) or []:
-            word_speaker = word.get("speaker")
+            word_speaker = word.get("speaker_raw") or word.get("speaker")
             if word_speaker and word_speaker in mapping:
-                word.setdefault("speaker_raw", word_speaker)
+                word["speaker_raw"] = word_speaker
                 word["speaker"] = mapping[word_speaker]
     return updated
 

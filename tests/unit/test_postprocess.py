@@ -39,6 +39,16 @@ def test_generate_and_apply_speaker_config(tmp_path: Path) -> None:
     assert updated["segments"][0]["speaker_raw"] == "SPEAKER_01"
 
 
+def test_speaker_mapping_can_be_reapplied() -> None:
+    data = _sample_whisperx_json()
+    first = apply_speaker_mapping(data, {"SPEAKER_01": "Speaker 1"})
+    assert extract_speaker_labels(first) == ["SPEAKER_01", "SPEAKER_02"]
+
+    second = apply_speaker_mapping(first, {"SPEAKER_01": "Sam", "SPEAKER_02": "Joe"})
+    assert [seg["speaker"] for seg in second["segments"]] == ["Sam", "Joe", "Sam"]
+    assert second["segments"][0]["speaker_raw"] == "SPEAKER_01"
+
+
 def test_build_diarized_json_roundtrip() -> None:
     data = _sample_whisperx_json()
     segments = segments_from_whisperx_json(data)

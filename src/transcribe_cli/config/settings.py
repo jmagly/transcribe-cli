@@ -8,7 +8,10 @@ Implements ADR-005: Configuration Management Strategy
 - Diarization configuration for pyannote
 """
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib  # type: ignore[no-redef]
 from pathlib import Path
 from typing import Any, Literal, Optional
 

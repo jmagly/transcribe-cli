@@ -39,6 +39,9 @@ dependencies = [
     "srt>=3.5.0",
     "tenacity>=8.0.0",
     "faster-whisper>=1.0.0",
+    'tomli>=1.1.0; python_version < "3.11"',
+    # faster-whisper passes av.open(metadata_errors=...), removed in PyAV 18+
+    "av>=11,<18",
 ]
 
 [project.optional-dependencies]
@@ -49,7 +52,7 @@ local = [
 
 # Speaker diarization (requires HuggingFace token)
 diarization = [
-    "pyannote.audio>=3.0.0",
+    "pyannote.audio>=4.0.0",
 ]
 
 # OpenAI API backend (alternative to local)
@@ -60,7 +63,7 @@ api = [
 # Full installation with all features
 full = [
     "faster-whisper>=1.0.0",
-    "pyannote.audio>=3.0.0",
+    "pyannote.audio>=4.0.0",
     "openai>=1.0.0",
 ]
 
@@ -72,6 +75,8 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
     "pip-audit>=2.0.0",
+    # tests import the OpenAI backend
+    "openai>=1.0.0",
     "pre-commit>=3.0.0",
 ]
 

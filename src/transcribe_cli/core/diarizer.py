@@ -17,6 +17,9 @@ class DiarizationError(Exception):
     pass
 
 
+DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+
+
 class DiarizationNotAvailable(Exception):
     """Raised when pyannote is not installed or configured."""
 
@@ -139,18 +142,24 @@ def _load_diarization_pipeline(config: DiarizationConfig):
         config.hf_token = os.environ.get("HF_TOKEN")
 
     if not config.hf_token:
+        # Fall back to a token saved by `hf auth login`
+        from huggingface_hub import get_token
+        config.hf_token = get_token()
+
+    if not config.hf_token:
         raise DiarizationNotAvailable(
             "HuggingFace token required for pyannote models.\n\n"
             "1. Create account at https://huggingface.co\n"
-            "2. Accept terms at https://hf.co/pyannote/speaker-diarization-3.1\n"
+            "2. Accept terms at "
+            "https://hf.co/pyannote/speaker-diarization-community-1\n"
             "3. Create token at https://hf.co/settings/tokens\n"
             "4. Set: export HF_TOKEN=hf_..."
         )
 
     try:
         pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=config.hf_token,
+            DIARIZATION_MODEL,
+            token=config.hf_token,
         )
         device = config.get_device()
         pipeline.to(torch.device(device))
@@ -192,7 +201,17 @@ def diarize_audio(
         if config.max_speakers:
             diarization_kwargs["max_speakers"] = config.max_speakers
 
-        diarization = pipeline(str(audio_path), **diarization_kwargs)
+        # Decode in-process (16 kHz mono) so pyannote does not depend on
+        # its own audio backend for formats like m4a or video containers.
+        import torch
+        from faster_whisper.audio import decode_audio
+
+        samples = decode_audio(str(audio_path), sampling_rate=16000)
+        waveform = torch.from_numpy(samples).unsqueeze(0)
+        diarization = pipeline(
+            {"waveform": waveform, "sample_rate": 16000}, **diarization_kwargs
+        )
+        diarization = diarization.speaker_diarization
 
         # Extract speaker segments
         speaker_segments = []
