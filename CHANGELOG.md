@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Re-running `postprocess` with an edited `speakers.json` now applies the new
   names (mapping keys on the original diarizer label).
 - Hugging Face token falls back to a saved `hf auth login` when `HF_TOKEN` is unset.
+- Python 3.9/3.10: fall back to `tomli` when `tomllib` is unavailable (config loading crashed on import).
 - `dev` extra now includes `openai`, which the test suite imports.
 - README and CLI help showed `transcribe <file>`; the command is `transcribe transcribe <file>`.
 
