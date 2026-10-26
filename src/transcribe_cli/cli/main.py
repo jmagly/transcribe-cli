@@ -143,11 +143,11 @@ def transcribe(
     """Transcribe a single audio or video file.
 
     Examples:
-        transcribe audio.mp3
-        transcribe video.mkv --format srt
-        transcribe recording.wav --model large-v3
-        transcribe meeting.mp4 --diarize --format diarized
-        transcribe audio.mp3 --backend api  # Use OpenAI API
+        transcribe transcribe audio.mp3
+        transcribe transcribe video.mkv --format srt
+        transcribe transcribe recording.wav --model large-v3
+        transcribe transcribe meeting.mp4 --diarize --format diarized
+        transcribe transcribe audio.mp3 --backend api  # Use OpenAI API
     """
     from transcribe_cli.core import (
         APIKeyMissingError,

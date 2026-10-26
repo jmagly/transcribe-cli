@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Speaker diarization now targets pyannote.audio 4.x and the
+  `pyannote/speaker-diarization-community-1` model (pyannote 3.x is no longer supported).
+- Audio for diarization is decoded in-process, so m4a and video inputs work
+  without pyannote's own audio backend.
+
+### Fixed
+- Pin PyAV below 18: faster-whisper passes `metadata_errors` to `av.open()`,
+  which PyAV 18+ removed, breaking all local transcription.
+- Re-running `postprocess` with an edited `speakers.json` now applies the new
+  names (mapping keys on the original diarizer label).
+- Hugging Face token falls back to a saved `hf auth login` when `HF_TOKEN` is unset.
+- `dev` extra now includes `openai`, which the test suite imports.
+- README and CLI help showed `transcribe <file>`; the command is `transcribe transcribe <file>`.
+
+### Added
+- README section documenting the diarization and speaker-naming workflow.
+
 ## [0.1.0] - 2024-12-04
 
 ### Added

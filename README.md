@@ -65,13 +65,13 @@ cp .env.example .env
 
 ```bash
 # Transcribe a single file
-transcribe audio.mp3
+transcribe transcribe audio.mp3
 
 # Transcribe video (extracts audio automatically)
-transcribe video.mkv
+transcribe transcribe video.mkv
 
 # Output as SRT subtitles
-transcribe audio.mp3 --format srt
+transcribe transcribe audio.mp3 --format srt
 
 # Batch process a directory
 transcribe batch ./recordings
@@ -85,7 +85,7 @@ transcribe extract video.mkv
 ### Transcribe Command
 
 ```bash
-transcribe <file> [OPTIONS]
+transcribe transcribe <file> [OPTIONS]
 
 Options:
   -o, --output-dir PATH   Output directory (default: current)
@@ -159,6 +159,32 @@ transcribe whisperx meeting.mkv --device cpu --compute-type int8
 Install WhisperX if needed:
 ```bash
 pip install whisperx
+```
+
+### Speaker Diarization
+
+Labels who spoke when, using pyannote `speaker-diarization-community-1`
+(requires `pip install "transcribe-cli[diarization]"`, pyannote.audio 4.x).
+
+1. Accept the model terms on Hugging Face for
+   `pyannote/speaker-diarization-community-1` and `pyannote/segmentation-3.0`.
+2. Provide a read token via `HF_TOKEN`, or a saved `hf auth login`.
+3. Transcribe with diarization (use one output directory per recording):
+
+```bash
+transcribe transcribe meeting.m4a --diarize --format diarized \
+  --model large-v3 -o ./out/meeting
+```
+
+This writes `out/meeting/postprocess/` containing `speakers.json`, labeled
+transcripts (txt, srt, vtt, tsv, json) and `reports/`.
+
+4. Edit the `name` values in `speakers.json` (keep the `id` values), then
+   re-apply the names:
+
+```bash
+transcribe postprocess out/meeting/postprocess/meeting.json \
+  -o out/meeting/postprocess --speaker-config out/meeting/postprocess/speakers.json
 ```
 
 ### Config Command
